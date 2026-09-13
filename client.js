@@ -50,7 +50,7 @@ window.__ModuleLoader__.load({
      * The two are kept in sync deliberately: `validation/verify-i18n.mjs`
      * fails when this string and package.json's `version` drift apart.
      */
-    var PLUGIN_VERSION = "0.2.0-rc.1";
+    var PLUGIN_VERSION = "0.2.0-rc.2";
 
     /** Simplified Chinese dictionary (the key-set source of truth). */
     var zh = {
