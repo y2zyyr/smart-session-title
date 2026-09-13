@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-DeepSeek Harness 会话智能标题插件。**0.3.0-rc.5 — 发布候选版本**，npm 标签为 `next`。
+DeepSeek Harness 会话智能标题插件。**0.3.0-rc.6 — 发布候选版本**，npm 标签为 `next`。
 
 ## 功能
 

@@ -3,7 +3,7 @@
 English | [简体中文](README.zh-CN.md)
 
 Smarter automatic session titles for **DeepSeek Harness (DSH)**.
-**0.3.0-rc.5 — release candidate**, intended for the npm `next` tag.
+**0.3.0-rc.6 — release candidate**, intended for the npm `next` tag.
 
 ## What it does
 

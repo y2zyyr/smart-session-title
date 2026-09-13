@@ -50,7 +50,7 @@ window.__ModuleLoader__.load({
      * The two are kept in sync deliberately: `validation/verify-i18n.mjs`
      * fails when this string and package.json's `version` drift apart.
      */
-    var PLUGIN_VERSION = "0.3.0-rc.5";
+    var PLUGIN_VERSION = "0.3.0-rc.6";
 
     /**
      * Where the batch block remembers its automatic-fallback checkbox. It is a
