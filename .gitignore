@@ -5,3 +5,6 @@ node_modules/
 .npmrc
 SMART_SESSION_TITLE_PHASE*
 validation/
+# Local-only agent collaboration instructions (never published to GitHub)
+AGENTS.md
+CLAUDE.md
