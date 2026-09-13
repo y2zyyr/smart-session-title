@@ -1,0 +1,64 @@
+{
+  "name": "smart-session-title",
+  "version": "0.2.0-rc.1",
+  "description": "Replacement session-title provider for DeepSeek Harness: compresses oversized first prompts instead of failing, and gates weak prompts.",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh-CN.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-primitives"
+      ],
+      "platform": "web"
+    }
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "dsh",
+    "session-title"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/dsh-llm": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-session-title": "0.1.5-rc.1",
+    "@deepseek-ai/schemastery": "3.18.2",
+    "@deepseek-ai/dsh-settings": "0.1.5-rc.1"
+  },
+  "engines": {
+    "node": ">=22.15.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/y2zyyr/smart-session-title.git"
+  },
+  "publishConfig": {
+    "access": "public",
+    "tag": "next"
+  },
+  "homepage": "https://github.com/y2zyyr/smart-session-title#readme",
+  "bugs": {
+    "url": "https://github.com/y2zyyr/smart-session-title/issues"
+  }
+}

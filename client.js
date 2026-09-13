@@ -1,0 +1,626 @@
+/**
+ * `smart-session-title` — browser half.
+ *
+ * Contributes ONE lightweight action to the official Session-header slot
+ * `conversation.session.header.actions` (kind `list`, scope `session`,
+ * `replaceRisk: "none"`, documented as "Title-adjacent Session actions in
+ * ascending order").
+ *
+ * The action does not implement regeneration. It invokes the host command
+ * `/retitle` through the SAME public Remote the shipped clients use
+ * (`ctx.remote.commands.execute(sessionId, line, [])`, cf.
+ * `dsh-client-ui-plan`), so the host runs the real command handler, which calls
+ * the real `SessionTitleService.refresh()`. No HTTP server, no DOM patching, no
+ * Electron IPC, no React-owner-chain patching.
+ *
+ * Why hand-written instead of built: a client half is a browser module loaded
+ * through `window.__ModuleLoader__.load`, and the packages it needs (`react`,
+ * the primitives) are supplied by the runtime's `require`, not by node_modules.
+ * Bundling would add a toolchain for no benefit, so this file is written
+ * directly against that contract — the same shape shipped client plugins use.
+ *
+ * Styling follows the shipped header-action affordance (a 28px round,
+ * transparent, icon-only button) using the design-token custom properties the
+ * shipped CSS uses (`--dsw-alias-*`). No official stylesheet is modified and no
+ * icon library is added.
+ */
+
+window.__ModuleLoader__.load({
+  id: "smart-session-title",
+  factory: (require) => {
+    var module = { exports: {} };
+    var exports = module.exports;
+    Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
+
+    var react = require("react");
+    var jsxRuntime = require("react/jsx-runtime");
+    var primitives = require("@deepseek-ai/dsh-client-ui-primitives");
+
+    /** Locale namespace for this plugin's strings. */
+    var NS = "smart-session-title";
+
+    /** The command line the host understands. */
+    var RETITLE_LINE = "/retitle";
+
+    /** Simplified Chinese dictionary (the key-set source of truth). */
+    var zh = {
+      "action.regenerate": "重新生成标题",
+      "action.regenerating": "正在重新生成标题…",
+      "action.disabled": "AI 标题已关闭",
+      "action.unavailable": "重新生成标题：命令不可用",
+      "action.failed": "重新生成标题失败"
+    };
+
+    /** English dictionary, key-identical to the Chinese source of truth. */
+    var en = {
+      "action.regenerate": "Regenerate title",
+      "action.regenerating": "Regenerating title…",
+      "action.disabled": "AI title generation is disabled",
+      "action.unavailable": "Regenerate title: command unavailable",
+      "action.failed": "Regenerate title failed"
+    };
+
+    /**
+     * In-flight guard: at most ONE regeneration per session.
+     *
+     * A second click while a regeneration is running joins the existing promise
+     * instead of issuing another command, so double-clicking cannot start two
+     * operations. The host would supersede the older one anyway (verified in the
+     * R4 test), but not issuing it is cheaper and keeps the first click's result.
+     *
+     * @param execute - `(sessionId, line) => Promise<outcome>`.
+     */
+    function createRegenerationController(execute) {
+      var active = new Map();
+      return {
+        isActive: function (sessionId) {
+          return active.has(sessionId);
+        },
+        /** Run (or join) one regeneration. Resolves to the outcome, or rejects. */
+        run: function (sessionId) {
+          var existing = active.get(sessionId);
+          if (existing !== undefined) return existing;
+          var run = Promise.resolve()
+            .then(function () {
+              return execute(sessionId, RETITLE_LINE);
+            })
+            .then(
+              function (outcome) {
+                active.delete(sessionId);
+                return outcome;
+              },
+              function (error) {
+                active.delete(sessionId);
+                throw error;
+              }
+            );
+          active.set(sessionId, run);
+          return run;
+        }
+      };
+    }
+
+    /**
+     * Interpret one `commands.execute` outcome.
+     *
+     * The Remote wraps the host outcome in `{ ok, value }`; the host returns
+     * `{ commandId, result }`, or `undefined` when no
+     * command matched. The command's own text is already rendered by DSH as a
+     * command flow node; this only decides the button's transient state.
+     */
+    function interpretOutcome(outcome) {
+      if (outcome && typeof outcome.ok === "boolean") {
+        if (!outcome.ok) return { kind: "error" };
+        outcome = outcome.value;
+      }
+      if (outcome === undefined) return { kind: "unavailable" };
+      var result = outcome.result;
+      if (result !== undefined && result.kind === "success") return { kind: "success" };
+      return { kind: "error" };
+    }
+
+    /** Icon-only action button, matching the shipped header-action affordance. */
+    /** Whether the live settings say AI titles are off. */
+    function isAiDisabledSnapshot(settingsSnapshot) {
+      if (settingsSnapshot === undefined || settingsSnapshot === null) return false;
+      if (settingsSnapshot.status !== "ready") return false;
+      var value = settingsSnapshot.value;
+      if (value === undefined || value === null) return false;
+      return value.enabled === false || value.mode === "disabled";
+    }
+
+    function RegenerateTitleAction(props) {
+      var sessionId = props.sessionId;
+      var regenerate = props.regenerate;
+      var t = props.t;
+      var scope = props.scope;
+
+      var statePair = react.useState("idle");
+      var state = statePair[0];
+      var setState = statePair[1];
+      var hoverPair = react.useState(false);
+      var hovered = hoverPair[0];
+      var setHovered = hoverPair[1];
+      var settingsPair = react.useState(function () {
+        return scope === undefined ? undefined : scope.getSnapshot();
+      });
+      var settingsSnapshot = settingsPair[0];
+      var setSettingsSnapshot = settingsPair[1];
+
+      var mounted = react.useRef(true);
+      react.useEffect(function () {
+        return function () {
+          mounted.current = false;
+        };
+      }, []);
+
+      react.useEffect(
+        function () {
+          if (scope === undefined) return undefined;
+          return scope.subscribe(function () {
+            if (mounted.current) setSettingsSnapshot(scope.getSnapshot());
+          });
+        },
+        [scope]
+      );
+
+      var aiDisabled = isAiDisabledSnapshot(settingsSnapshot);
+      var busy = state === "loading" || aiDisabled;
+      var label = aiDisabled
+        ? t("action.disabled")
+        : t(state === "loading" ? "action.regenerating" : "action.regenerate");
+
+      var onClick = react.useCallback(
+        function () {
+          if (busy) return;
+          setState("loading");
+          Promise.resolve(regenerate()).then(
+            function (outcome) {
+              if (!mounted.current) return;
+              var verdict = interpretOutcome(outcome);
+              setState(verdict.kind === "success" ? "idle" : "error");
+            },
+            function () {
+              if (!mounted.current) return;
+              setState("error");
+            }
+          );
+        },
+        [busy, regenerate]
+      );
+
+      // The shipped affordance: 28px round, transparent, tertiary label colour,
+      // hover background, 0.45 opacity while disabled.
+      var style = {
+        width: 28,
+        height: 28,
+        padding: 0,
+        border: "none",
+        borderRadius: 999,
+        display: "grid",
+        placeItems: "center",
+        flex: "none",
+        background: hovered && !busy ? "var(--dsw-alias-interactive-bg-hover)" : "transparent",
+        color: "var(--dsw-alias-label-tertiary)",
+        cursor: busy ? "default" : "pointer",
+        opacity: busy ? 0.45 : 1
+      };
+
+      return jsxRuntime.jsx("button", {
+        type: "button",
+        style: style,
+        disabled: busy,
+        "aria-busy": busy ? "true" : undefined,
+        "aria-label": label,
+        title: state === "error" ? t("action.failed") : label,
+        onClick: onClick,
+        onMouseEnter: function () {
+          setHovered(true);
+        },
+        onMouseLeave: function () {
+          setHovered(false);
+        },
+        children: jsxRuntime.jsx(primitives.IconRefreshOutline16, {})
+      });
+    }
+
+    /** Client services this plugin needs. */
+    var inject = ["slots", "remote", "remote.commands", "locale", "settingsScope"];
+
+    /**
+     * Client plugin body: register dictionaries and the header action.
+     * @param ctx - client root context.
+     */
+    function apply(ctx) {
+      ctx.effect(
+        function () {
+          return ctx.locale.register(NS, { zh: zh, en: en });
+        },
+        "smart-session-title: dictionaries"
+      );
+
+      var controller = createRegenerationController(function (sessionId, line) {
+        return ctx.remote.commands.execute(sessionId, line, []);
+      });
+
+      // The settings page binds this plugin's own namespace scope through the
+      // settings domain's base service — the documented route for a feature that
+      // owns a preference.
+      var settingsScope = ctx.settingsScope.bind({ namespace: NS });
+      ctx.slots.inject("settings.section", function () {
+        return ctx.slots.register(
+          {
+            name: "settings.section",
+            id: "smart-session-title",
+            order: 30,
+            label: "Smart Session Title",
+            locale: NS,
+            inject: function () { return { scope: settingsScope }; }
+          },
+          SettingsSection
+        );
+      });
+
+      ctx.slots.inject("conversation.session.header.actions", function () {
+        return ctx.slots.register(
+          {
+            name: "conversation.session.header.actions",
+            id: "smart-session-title-regenerate",
+            // Ascending order; the shipped occupants sit at 10 (agent preset)
+            // and 20 (jobs), so 30 places this action beside them.
+            order: 30,
+            // Plain string: this slot's owner renders no projected label, and the
+            // visible text comes from the namespaced `t` the `locale` option
+            // injects into the component.
+            label: "Regenerate title",
+            locale: NS,
+            inject: function (sessionId) {
+              return {
+                regenerate: function () {
+                  return controller.run(sessionId);
+                },
+                // Lets the button follow the AI on/off setting without a reload.
+                scope: settingsScope
+              };
+            }
+          },
+          RegenerateTitleAction
+        );
+      });
+    }
+
+    exports.name = "smart-session-title-client";
+    exports.inject = inject;
+    exports.apply = apply;
+    exports.NS = NS;
+    exports.RETITLE_LINE = RETITLE_LINE;
+    // Testable seams: the transports and the in-flight guard are exercised by
+    // tests/client.test.mjs against a stub module loader.
+    exports.createRegenerationController = createRegenerationController;
+    exports.interpretOutcome = interpretOutcome;
+    exports.RegenerateTitleAction = RegenerateTitleAction;
+    exports.isAiDisabledSnapshot = isAiDisabledSnapshot;
+    /**
+     * Settings section component — the `settings.section` page.
+     *
+     * Receives `scope` through the slot's `inject` face: a bound
+     * `SettingsScopeController` exposing `getSnapshot()`, `set(field, value)`
+     * and `subscribe(listener)`. Every write goes through that public Remote;
+     * the component never talks to a host API of its own.
+     */
+    function SettingsSection(props) {
+      var scope = props.scope;
+
+      // Hooks run unconditionally at the top: React requires a stable order, so
+      // no early return may precede them.
+      var snapPair = react.useState(function () {
+        return scope.getSnapshot();
+      });
+      var snap = snapPair[0];
+      var setSnap = snapPair[1];
+      var advPair = react.useState(false);
+      var advancedOpen = advPair[0];
+      var setAdvancedOpen = advPair[1];
+      var draftPair = react.useState({});
+      var draft = draftPair[0];
+      var setDraft = draftPair[1];
+      var errorPair = react.useState("");
+      var error = errorPair[0];
+      var setError = errorPair[1];
+      function save(operation) {
+        setError("");
+        return Promise.resolve().then(operation).catch(function () {
+          setError("Settings could not be saved. Check the values and DSH logs.");
+        });
+      }
+
+
+      react.useEffect(
+        function () {
+          return scope.subscribe(function () {
+            setSnap(scope.getSnapshot());
+          });
+        },
+        [scope]
+      );
+
+      if (snap.status === "unavailable") {
+        return jsxRuntime.jsx("p", {
+          style: { fontSize: 13, color: "var(--dsw-alias-label-tertiary)" },
+          children: "Settings are unavailable in this browser."
+        });
+      }
+      if (snap.status !== "ready") {
+        return jsxRuntime.jsx("p", {
+          style: { fontSize: 13, color: "var(--dsw-alias-label-tertiary)" },
+          children: "Loading\u2026"
+        });
+      }
+
+      var value = snap.value || {};
+      var user = snap.user || {};
+      var busy = !snap.writable;
+
+      // The resolved value carries the composition base; the raw user section
+      // tells us what the human actually chose. `mode === undefined` means they
+      // never chose, and the effective behaviour is the session route.
+      var enabled = value.enabled !== false;
+      var chosenMode = typeof user.mode === "string" ? user.mode : undefined;
+      var effectiveMode = draft.mode || chosenMode || value.mode || "current-session";
+
+      var fieldStyle = {
+        boxSizing: "border-box",
+        padding: "4px 8px",
+        borderRadius: 6,
+        border: "1px solid var(--dsw-alias-border-l4)",
+        background: busy ? "transparent" : "var(--dsw-alias-bg-base)",
+        color: "inherit",
+        fontSize: 13
+      };
+      var labelStyle = { display: "block", marginBottom: 2, fontSize: 13 };
+      var hintStyle = {
+        fontSize: 12,
+        color: "var(--dsw-alias-label-tertiary)",
+        margin: 0,
+        lineHeight: 1.4
+      };
+
+      function writeField(field, raw) {
+        if (field === "timeoutMs" || field === "maxAttempts") {
+          // Empty means "inherit the row config", which is an unset, not a 0.
+          if (raw === "") save(function () { return scope.unset(field); });
+          else {
+            var parsed = Number.parseInt(raw, 10);
+            if (Number.isFinite(parsed)) save(function () { return scope.set(field, parsed); });
+          }
+          return;
+        }
+        if (raw === "") save(function () { return scope.unset(field); });
+        else save(function () { return scope.set(field, raw); });
+      }
+
+      var children = [];
+
+      children.push(
+        react.createElement(
+          "label",
+          {
+            key: "enabled",
+            style: {
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              marginBottom: 12,
+              cursor: busy ? "default" : "pointer"
+            }
+          },
+          react.createElement("input", {
+            type: "checkbox",
+            checked: enabled,
+            disabled: busy,
+            onChange: function (event) {
+              writeField("enabled", event.target.checked);
+            }
+          }),
+          "AI title generation"
+        )
+      );
+
+      children.push(
+        react.createElement(
+          "fieldset",
+          {
+            key: "mode",
+            style: { border: "none", padding: 0, margin: "0 0 12px 0" }
+          },
+          react.createElement(
+            "legend",
+            { style: { fontWeight: 500, marginBottom: 4, padding: 0, fontSize: 13 } },
+            "Title model"
+          ),
+          ["current-session", "configured", "disabled"].map(function (mode) {
+            return react.createElement(
+              "label",
+              {
+                key: mode,
+                style: {
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "2px 0",
+                  fontSize: 13,
+                  cursor: busy ? "default" : "pointer"
+                }
+              },
+              react.createElement("input", {
+                type: "radio",
+                name: "smart-session-title-mode",
+                value: mode,
+                checked: effectiveMode === mode,
+                disabled: busy,
+                onChange: function () {
+                  setDraft(Object.assign({}, draft, { mode: mode }));
+                  if (mode !== "configured") writeField("mode", mode);
+                }
+              }),
+              mode === "current-session"
+                ? "Current session model"
+                : mode === "configured"
+                  ? "Configured model"
+                  : "Disabled"
+            );
+          })
+        )
+      );
+
+      if (effectiveMode === "configured") {
+        children.push(
+          react.createElement(
+            "div",
+            { key: "provider", style: { marginBottom: 8 } },
+            react.createElement("label", { style: labelStyle }, "Provider"),
+            react.createElement("input", {
+              type: "text",
+              value: draft.provider !== undefined ? draft.provider : (value.provider || ""),
+              disabled: busy,
+              placeholder: "Provider ID",
+              style: Object.assign({ width: "100%" }, fieldStyle),
+              onChange: function (event) {
+                setDraft(Object.assign({}, draft, { provider: event.target.value }));
+              }
+            })
+          )
+        );
+        children.push(
+          react.createElement(
+            "div",
+            { key: "model", style: { marginBottom: 12 } },
+            react.createElement("label", { style: labelStyle }, "Model"),
+            react.createElement("input", {
+              type: "text",
+              value: draft.model !== undefined ? draft.model : (value.model || ""),
+              disabled: busy,
+              placeholder: "Model ID",
+              style: Object.assign({ width: "100%" }, fieldStyle),
+              onChange: function (event) {
+                setDraft(Object.assign({}, draft, { model: event.target.value }));
+              }
+            })
+          )
+        );
+        children.push(
+          react.createElement(
+            "p",
+            { key: "privacy", style: Object.assign({ marginTop: 0, marginBottom: 12 }, hintStyle) },
+            "Titles will be generated by this provider: the compressed first prompt is sent to it, ",
+            "which may differ from your session provider."
+          )
+        );
+      }
+
+
+      if (effectiveMode === "configured") {
+        var providerId = (draft.provider !== undefined ? draft.provider : (value.provider || "")).trim();
+        var modelId = (draft.model !== undefined ? draft.model : (value.model || "")).trim();
+        children.push(react.createElement("button", {
+          key: "save-route", type: "button", disabled: busy || !providerId || !modelId,
+          onClick: function () {
+            save(function () { return scope.mutate([
+              { op: "set", path: ["provider"], value: providerId },
+              { op: "set", path: ["model"], value: modelId },
+              { op: "set", path: ["mode"], value: "configured" }
+            ]); });
+          }
+        }, "Save configured model"));
+      }
+      if (error) children.push(react.createElement("p", { key: "error", role: "alert" }, error));
+
+      if (effectiveMode === "disabled" || !enabled) {
+        children.push(
+          react.createElement(
+            "p",
+            { key: "disabled-note", style: Object.assign({ marginTop: 0, marginBottom: 12 }, hintStyle) },
+            "AI titles are off. DSH still sets a fallback title from your first prompt, and manual ",
+            "renames are unaffected."
+          )
+        );
+      }
+
+      children.push(
+        react.createElement(
+          "div",
+          { key: "advanced" },
+          react.createElement(
+            "button",
+            {
+              type: "button",
+              style: {
+                background: "none",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+                fontSize: 13,
+                color: "var(--dsw-alias-label-tertiary)"
+              },
+              onClick: function () {
+                setAdvancedOpen(!advancedOpen);
+              }
+            },
+            advancedOpen ? "\u25be Advanced" : "\u25b8 Advanced"
+          ),
+          advancedOpen
+            ? react.createElement(
+                "div",
+                { style: { paddingLeft: 8, marginTop: 6 } },
+                react.createElement(
+                  "div",
+                  { style: { marginBottom: 6 } },
+                  react.createElement("label", { style: labelStyle }, "Timeout (ms)"),
+                  react.createElement("input", {
+                    type: "number",
+                    min: 1000,
+                    max: 120000,
+                    value: typeof user.timeoutMs === "number" ? user.timeoutMs : "",
+                    disabled: busy,
+                    placeholder: "15000",
+                    style: Object.assign({ width: 120 }, fieldStyle),
+                    onChange: function (event) {
+                      writeField("timeoutMs", event.target.value);
+                    }
+                  })
+                ),
+                react.createElement(
+                  "div",
+                  { style: { marginBottom: 6 } },
+                  react.createElement("label", { style: labelStyle }, "Max attempts"),
+                  react.createElement("input", {
+                    type: "number",
+                    min: 1,
+                    max: 3,
+                    value: typeof user.maxAttempts === "number" ? user.maxAttempts : "",
+                    disabled: busy,
+                    placeholder: "2",
+                    style: Object.assign({ width: 80 }, fieldStyle),
+                    onChange: function (event) {
+                      writeField("maxAttempts", event.target.value);
+                    }
+                  })
+                ),
+                react.createElement(
+                  "p",
+                  { style: hintStyle },
+                  "An empty field inherits the deployment's composition config. ",
+                  "Changes apply to the next title generation; credentials stay managed by DSH."
+                )
+              )
+            : null
+        )
+      );
+
+      return react.createElement("div", {}, children);
+    }
+
+  exports.SettingsSection = SettingsSection;
+  return module.exports;
+  }
+});

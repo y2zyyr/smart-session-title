@@ -1,0 +1,39 @@
+# smart-session-title bundle patch.
+#
+# `@deepseek-ai/dsh-session-title` allows exactly ONE registered provider:
+# `SessionTitleService.register()` throws
+#   session-title provider "<id>" is already registered
+# on a second registration. The `@deepseek-ai/dsh-base` bundle mounts
+# `@deepseek-ai/dsh-session-title-first-prompt-llm` under the row id
+# `session-title-llm`, so this plugin MUST disable that row in a later patch
+# layer before inserting its own provider. Verified: dsh-app-boot
+# `applyEntryPatches()` applies each bundle's patch list in
+# `dsh.profile.bundles` order, then the profile layer, so a row inserted by
+# dsh-base is addressable by id here.
+#
+# Phase 1 deliberately leaves `purpose`, `automatic` cadence and the
+# SessionTitleService itself untouched.
+
+# Step 1 — retire the built-in provider (single-provider slot).
+- id: session-title-llm
+  disabled: true
+
+# Step 2 — insert our provider.
+- insert:
+    - id: smart-session-title
+      name: 'smart-session-title'
+      config:
+        # Soft targets for the generated title (Core enforces maxTitleBytes: 80).
+        targetWords: 6
+        targetCjkCharacters: 12
+        # Raw-prompt ceiling we are willing to read at all.
+        maxRawInputBytes: 65536
+        # Budget actually sent to the title model. This is the load-bearing
+        # change: the built-in provider hard-failed (threw) above 4096 bytes
+        # and never even reached the model.
+        targetPreparedInputBytes: 12000
+        # A fenced code block larger than this is replaced by a placeholder.
+        codeBlockKeepBytes: 400
+        maxOutputTokens: 96
+        timeoutMs: 15000
+        maxAttempts: 2
