@@ -3,7 +3,7 @@
 English | [简体中文](README.zh-CN.md)
 
 Smarter automatic session titles for **DeepSeek Harness (DSH)**.
-**0.3.0-rc.1 — release candidate**, intended for the npm `next` tag.
+**0.3.0-rc.2 — release candidate**, intended for the npm `next` tag.
 
 ## What it does
 
@@ -124,6 +124,13 @@ Pick the rows (or select all within one project) and start the run.
   interrupts a run, and every session that already finished keeps its new title.
   Cancel takes effect after the session currently in flight, because the Remote
   command call carries no cancellation signal.
+- Failures list the **host's own reason** (dead route, timeout, maxOutputTokens,
+  no usable message) instead of a generic "failed", and **Retry failed**
+  re-runs exactly those sessions with whatever route settings are in force now.
+- Route caveat: **Current session model** uses the model each stored session
+  logged, and an old session may name a provider/model that no longer exists or
+  whose credentials are gone — those fail within milliseconds. Switch to
+  **Configured model**, pick a working pair, then use **Retry failed**.
 
 ## Model modes
 

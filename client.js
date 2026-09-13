@@ -50,7 +50,7 @@ window.__ModuleLoader__.load({
      * The two are kept in sync deliberately: `validation/verify-i18n.mjs`
      * fails when this string and package.json's `version` drift apart.
      */
-    var PLUGIN_VERSION = "0.3.0-rc.1";
+    var PLUGIN_VERSION = "0.3.0-rc.2";
 
     /** Muted helper-text style shared by the settings blocks. */
     var HINT_STYLE = {
@@ -99,6 +99,8 @@ window.__ModuleLoader__.load({
       "batch.legend": "批量优化历史标题",
       "batch.intro": "选中要重新生成标题的历史会话。每个会话调用一次模型；被选中的标题会被重写，包括你手动改过的标题。",
       "batch.costHint": "每个会话一次模型调用：选得越多越慢，并产生相应的模型费用。",
+      "batch.routeHint": "「跟随当前会话模型」会使用每个会话自己记录的模型；旧会话记录的模型可能已不存在或凭据失效，此时改成「指定模型」再重试即可。",
+      "batch.retryFailed": "重试失败项",
       "batch.load": "加载历史会话",
       "batch.reload": "重新加载",
       "batch.loading": "正在加载历史会话…",
@@ -170,6 +172,8 @@ window.__ModuleLoader__.load({
       "batch.legend": "Optimize past titles",
       "batch.intro": "Pick the past sessions to retitle. Each one costs one model call; the selected titles are rewritten, including titles you renamed by hand.",
       "batch.costHint": "One model call per session: the more you select, the slower and the more expensive the run.",
+      "batch.routeHint": "\"Current session model\" uses the model each session logged. For old sessions that model may no longer exist or its credentials may be gone; switch to \"Configured model\" and retry.",
+      "batch.retryFailed": "Retry failed",
       "batch.load": "Load past sessions",
       "batch.reload": "Reload",
       "batch.loading": "Loading past sessions…",
@@ -249,16 +253,42 @@ window.__ModuleLoader__.load({
      * `{ commandId, result }`, or `undefined` when no
      * command matched. The command's own text is already rendered by DSH as a
      * command flow node; this only decides the button's transient state.
+     *
+     * `text` carries the host's own wording — the new title on success, and the
+     * real failure reason on failure (dead historical route, timeout,
+     * maxOutputTokens, no usable message). That is what turns a batch failure
+     * list from 13 identical "failed" rows into something actionable.
      */
     function interpretOutcome(outcome) {
       if (outcome && typeof outcome.ok === "boolean") {
-        if (!outcome.ok) return { kind: "error" };
+        if (!outcome.ok) return { kind: "error", text: failureText(outcome.error) };
         outcome = outcome.value;
       }
-      if (outcome === undefined) return { kind: "unavailable" };
+      if (outcome === undefined) return { kind: "unavailable", text: "" };
       var result = outcome.result;
-      if (result !== undefined && result.kind === "success") return { kind: "success" };
-      return { kind: "error" };
+      if (result !== undefined && result.kind === "success") {
+        return { kind: "success", text: typeof result.text === "string" ? result.text : "" };
+      }
+      if (result !== undefined && result.kind === "error") {
+        return { kind: "error", text: typeof result.text === "string" ? result.text : "" };
+      }
+      return { kind: "error", text: "" };
+    }
+
+    /** Best-effort message text out of a Remote failure value. */
+    function failureText(value) {
+      if (typeof value === "string") return value;
+      if (value !== null && typeof value === "object") {
+        if (typeof value.message === "string") return value.message;
+        if (typeof value.text === "string") return value.text;
+      }
+      return "";
+    }
+
+    /** Bound one recorded reason so a failure list stays readable. */
+    function truncateReason(text) {
+      if (typeof text !== "string") return "";
+      return text.length > 200 ? text.slice(0, 200) + "…" : text;
     }
 
     /** Accepted title of one `session.list` row ("" when it has none yet). */
@@ -353,7 +383,11 @@ window.__ModuleLoader__.load({
         emit({
           completed: state.completed + 1,
           failed: state.failed + 1,
-          failures: state.failures.concat([{ sessionId: entry.sessionId, kind: verdict.kind }]),
+          failures: state.failures.concat([{
+            sessionId: entry.sessionId,
+            kind: verdict.kind,
+            reason: truncateReason(verdict.text)
+          }]),
           currentSessionId: ""
         });
       }
@@ -1516,6 +1550,9 @@ window.__ModuleLoader__.load({
       children.push(
         react.createElement("p", { key: "cost", style: Object.assign({ marginTop: 0, marginBottom: 8 }, HINT_STYLE) }, t("batch.costHint"))
       );
+      children.push(
+        react.createElement("p", { key: "route", style: Object.assign({ marginTop: 0, marginBottom: 8 }, HINT_STYLE) }, t("batch.routeHint"))
+      );
 
       if (aiDisabled) {
         children.push(
@@ -1707,6 +1744,25 @@ window.__ModuleLoader__.load({
                   },
                   t("batch.cancel")
                 )
+              : null,
+            !running && snap.failures.length > 0
+              ? react.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    style: buttonStyle,
+                    onClick: function () {
+                      // Retry exactly the sessions that failed, with whatever
+                      // route settings are in force now (the usual fix is to
+                      // move from "follow the session model" to a configured
+                      // model, because an old session's logged route may be gone).
+                      batch.start(snap.failures.map(function (failure) {
+                        return { sessionId: failure.sessionId };
+                      }));
+                    }
+                  },
+                  t("batch.retryFailed") + " (" + String(snap.failures.length) + ")"
+                )
               : null
           )
         );
@@ -1775,11 +1831,16 @@ window.__ModuleLoader__.load({
                   { style: { marginTop: 4 } },
                   react.createElement("p", { style: Object.assign({ marginTop: 0, marginBottom: 2 }, HINT_STYLE) }, t("batch.failures")),
                   snap.failures.map(function (failure) {
+                    // The host's own wording is the actionable part: it is what
+                    // separates a dead historical route from a timeout.
+                    var label = failure.kind === "unavailable" ? t("batch.kindUnavailable") : t("batch.kindError");
+                    var detail = typeof failure.reason === "string" && failure.reason !== ""
+                      ? label + ": " + failure.reason
+                      : label;
                     return react.createElement(
                       "p",
-                      { key: failure.sessionId, style: HINT_STYLE },
-                      failure.sessionId + " — " +
-                        (failure.kind === "unavailable" ? t("batch.kindUnavailable") : t("batch.kindError"))
+                      { key: failure.sessionId, style: Object.assign({}, HINT_STYLE, { wordBreak: "break-word" }) },
+                      failure.sessionId + " — " + detail
                     );
                   })
                 )
