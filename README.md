@@ -3,7 +3,7 @@
 English | [简体中文](README.zh-CN.md)
 
 Smarter automatic session titles for **DeepSeek Harness (DSH)**.
-**0.4.0-rc.2 — release candidate**, intended for the npm `next` tag.
+**0.4.0-rc.3 — release candidate**, intended for the npm `next` tag.
 
 ## What it does
 
@@ -43,7 +43,7 @@ that profile. For a manually managed profile, run this **inside the profile dire
 npm install smart-session-title@next --legacy-peer-deps
 ```
 
-DSH supplies the pinned runtime peers; `--legacy-peer-deps` prevents npm from
+DSH supplies the runtime peers; `--legacy-peer-deps` prevents npm from
 installing a separate Core stack. Follow the compatibility requirements below.
 For local installation, copying this package into the profile's
 `node_modules/smart-session-title` is also supported and has been verified on Desktop.
@@ -77,7 +77,7 @@ its replacement patch active does not restore the built-in provider.
 
 Validated with **DSH Desktop 2.0.9**, **Core 0.1.5-rc.1**, **Cordis 4.0.2**,
 **Schemastery 3.18.2**, and **Node ≥22.15.0**.
-Runtime peer versions are pinned. Other Core versions have not been verified.
+DSH runtime peers use the prerelease-compatible range `^0.1.5-rc.1`; Schemastery remains pinned to `3.18.2`. Other Core versions have not been verified.
 
 Startup checks the title, LLM, and Settings capabilities. Invalid settings fail
 before the provider is registered. The Web client uses official slots, locale,
@@ -225,7 +225,7 @@ first meaningful task to the explicitly selected provider, which may be differen
 
 Titles never enter model context. The plugin does not append an extra
 `session/title-llm-request` prompt copy to the session log.
-Only the six declared Settings fields are accepted. Unknown credential-shaped
+Only the nine declared Settings fields are accepted. Unknown credential-shaped
 fields such as `apiKey`, token, cookie, credential, secret, and password are rejected.
 Credentials remain entirely managed by DSH.
 
@@ -290,13 +290,30 @@ Private development reports, session records, and local test fixtures are exclud
   languages fall back to English).
 - The batch runner lives in the **Web client half**, not on the host: closing the
   settings page does not stop a run, but reloading the DSH window does. The host
-  half is compiled and is not part of this repository, so a stored job queue and a
-  host-side route fallback are out of scope.
-- The automatic-fallback preference and the batch queue are not persisted; a
-  reloaded window starts from an idle state (titles already written are permanent).
+  modules in `lib/*.js` are tracked and shipped. Their original TypeScript sources
+  are unavailable, so JavaScript is maintained directly alongside `lib/*.d.ts`.
+  A persistent job queue and host-side route fallback are not implemented.
+- The automatic-fallback preference is stored in browser localStorage; the batch
+  queue is not persisted. A reloaded window starts from an idle state (titles already written are permanent).
 - No task-drift retitling, shortcuts, cloud sync, telemetry, custom database, or
   advanced model-management UI.
 
 ## License
 
 [MIT](LICENSE)
+
+## Development checks
+
+Run `npm test` with Node.js 22.15 or newer. The repository includes client/i18n,
+host-policy, and provider behavior tests; no additional dependencies are needed.
+Validation files are excluded from the published package by the `files` whitelist.
+
+Settings reject out-of-range or fractional numeric input with an explanation and
+verify persisted values after writes. Automatic fallback preserves overall batch
+counts and shows retry progress separately. Stopping it is reported as stopped;
+mode changes observed during fallback are preserved when restoring the route.
+
+The settings page groups model and title-format controls into separate cards.
+Advanced parameters, format explanations, and the batch tool start collapsed;
+an active batch opens its controls automatically. The layout adapts to narrow
+windows, and form fields have associated labels and visible keyboard focus.

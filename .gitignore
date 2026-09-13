@@ -4,7 +4,10 @@ node_modules/
 .env*
 .npmrc
 SMART_SESSION_TITLE_PHASE*
-validation/
+validation/*
+!validation/verify-i18n.mjs
+!validation/verify-host-policy.mjs
+!validation/verify-provider.mjs
 # Local-only agent collaboration instructions (never published to GitHub)
 AGENTS.md
 CLAUDE.md

@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-DeepSeek Harness 会话智能标题插件。**0.4.0-rc.2 — 发布候选版本**，npm 标签为 `next`。
+DeepSeek Harness 会话智能标题插件。**0.4.0-rc.3 — 发布候选版本**，npm 标签为 `next`。
 
 ## 功能
 
@@ -54,7 +54,7 @@ npm install smart-session-title@next --legacy-peer-deps
 ## 兼容性
 
 验证环境：DSH Desktop **2.0.9**、Core **0.1.5-rc.1**、Cordis **4.0.2**、Schemastery **3.18.2**，Node **≥22.15.0**。
-`dsh-llm`、`dsh-session-title`、`dsh-settings` 和 Schemastery peerDependencies 使用精确版本。
+`dsh-llm`、`dsh-session-title`、`dsh-settings` 的 peerDependencies 使用兼容预发布版本的范围 `^0.1.5-rc.1`；Schemastery 保持精确版本 `3.18.2`。
 启动检查 title service、LLM、Settings 能力；非法设置在 provider 注册之前失败。
 Web 端需要 DSH 原生 slots、locale、settingsScope 和 Remote commands。
 其他 Core 版本尚未验证，不按版本字符串硬编码拒绝。
@@ -153,7 +153,7 @@ AI 关闭时 `/retitle` 返回 `AI title generation is disabled.`，不调用模
 configured 模式会把压缩后的首条有效任务发送给所选 provider，该 provider 可能不同于会话 provider。
 标题不会进入模型上下文；插件不额外保存 `session/title-llm-request` 提示副本。
 
-插件 Settings 只允许六个声明字段，unknown-key guard 拒绝 `apiKey`、token、cookie、credential、secret、password 等未知字段。
+插件 Settings 只允许九个声明字段，unknown-key guard 拒绝 `apiKey`、token、cookie、credential、secret、password 等未知字段。
 UI 只处理模型 ID 和运行参数，凭据完全由 DSH 管理。
 诊断不写完整 Prompt、完整模型响应或凭据；adapter 原始错误文本也不写入插件日志，避免错误回显敏感输入。
 
@@ -202,10 +202,23 @@ Phase 3 已在隔离真实 DSH runtime 挂载原装 Desktop exporter，确认成
 - **REASONING_CONTROL_UNAVAILABLE_CONFIRMED**：没有跨 adapter 的统一 reasoning-disabled 控制。插件不硬塞 `off`，沿用 adapter 默认行为。
 - 某些 reasoning 模型可能用尽 96-token 标题输出预算，正确保留 fallback。
 - Configured 模式的 provider/model 从 DSH 已注册的模型中选择，取不到列表时回退手动输入；设置页与标题按钮文案跟随 DSH 界面语言（中英双语词典，其他语言回退英文）。
-- 批量运行器位于 **Web 客户端半**而非 host：关闭设置页不会中断，但刷新 DSH 窗口会中断；host 半是编译产物且不在本仓库，因此「持久任务队列」与「host 层路由回退」不在范围内。
+- 批量运行器位于 **Web 客户端半**而非 host：关闭设置页不会中断，但刷新 DSH 窗口会中断；host 模块 `lib/*.js` 已入库且随包发布，原始 TypeScript 源码不可用，因此直接维护 JavaScript，并同步维护 `lib/*.d.ts`。目前未实现持久任务队列与 host 层路由回退。
 - 自动兜底的勾选状态与批次队列不持久化：刷新窗口后回到空闲态（已写入的标题不受影响）。
 - 不做任务漂移自动重命名、快捷键、云同步、遥测、独立数据库或复杂模型管理。
 
 ## 许可证
 
 MIT
+
+## 开发验证
+
+使用 Node.js 22.15 或更新版本运行 `npm test`。仓库包含客户端/i18n、host 策略和
+provider 行为测试，无需新增依赖。`files` 白名单保证验证文件不随 npm 包发布。
+
+设置界面会解释数字越界或非整数错误，并在写入后核对实际保存值。自动兜底保留
+整批会话统计，单独显示重试进度；停止重试会显示已停止，恢复路由时保留期间观察到
+的用户模式修改。兜底偏好存于浏览器 localStorage，批量队列不持久化，刷新后回到空闲状态。
+
+设置页按「标题模型」「标题格式」分区，统一控件尺寸与间距。高级参数、格式说明
+和历史批量工具默认折叠，批量运行时自动展开。布局适配窄窗口，表单关联标签并提供
+清晰的键盘焦点提示。
