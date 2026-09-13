@@ -3,7 +3,7 @@
 English | [简体中文](README.zh-CN.md)
 
 Smarter automatic session titles for **DeepSeek Harness (DSH)**.
-**0.3.0-rc.2 — release candidate**, intended for the npm `next` tag.
+**0.3.0-rc.3 — release candidate**, intended for the npm `next` tag.
 
 ## What it does
 
@@ -103,6 +103,10 @@ Explicit `current-session` always uses the session route.
 For **Configured model**, enter both IDs and click **Save configured model**.
 All three route fields are saved atomically. IDs come from DSH's Models page;
 this plugin does not manage credentials or provide a model browser.
+Selecting the **Configured model** radio alone is not enough: with a usable pair
+already saved the plugin applies it immediately, otherwise the page states that
+the change is not in effect yet — until then titles keep following
+**Current session model**, i.e. the model each session logged.
 **Advanced** exposes timeout and attempts. Empty numeric fields inherit the bundle
 configuration; deployment-level compression options are in `cordis.patch.yml`.
 

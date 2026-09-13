@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-DeepSeek Harness 会话智能标题插件。**0.3.0-rc.2 — 发布候选版本**，npm 标签为 `next`。
+DeepSeek Harness 会话智能标题插件。**0.3.0-rc.3 — 发布候选版本**，npm 标签为 `next`。
 
 ## 功能
 
@@ -75,6 +75,8 @@ Web 端需要 DSH 原生 slots、locale、settingsScope 和 Remote commands。
 
 选择 Configured model 后，先填完整 provider/model，再点击 **Save configured model**，一次提交完整路由。
 ID 来自 DSH 的 Models 页面；本插件没有模型浏览器，也不接受凭据字段。
+只点 **指定模型** 单选按钮是不够的：若已有可用的 provider/model 组合，插件会立即应用；否则页面会明确提示
+「尚未生效」——在保存之前，标题仍按「跟随当前会话模型」生成，也就是用每个会话自己记录的旧模型。
 Advanced 展开 timeout/maxAttempts。空值继承 bundle 行配置；其他部署级压缩参数见 `cordis.patch.yml`。
 
 ### 批量优化历史标题
