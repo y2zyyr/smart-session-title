@@ -9,6 +9,10 @@ DeepSeek Harness 会话智能标题插件。**0.3.0-rc.5 — 发布候选版本*
 自动把会话任务概括为短标题。默认直接使用**该会话实际使用的 provider/model**，无需另选模型。
 压缩过长、代码密集的输入，拒绝无任务含义的问候和无用模型输出；保留 DSH 的 fallback、人工标题保护、持久化、投影与并发控制。
 
+- 提供 `/retitle` 与标题旁的重新生成按钮，显式重新生成可覆盖人工标题。
+- **批量优化历史会话标题**：列表勾选、进度条、关闭设置页后继续跑，并且随时可停。
+- 设置页页脚显示当前插件版本，便于反馈问题时指明构建版本。
+
 ## 为什么需要它
 
 已验证的 DSH 内建 provider 在输入超过 4096 bytes 时不调用模型。本插件会压缩再生成；15,536-byte 原始测试提示已通过真实模型验证。
@@ -60,6 +64,7 @@ Web 端需要 DSH 原生 slots、locale、settingsScope 和 Remote commands。
 打开 **设置 → 智能会话标题**。配置通过 DSH 官方 `settingsScope` / Remote Settings 写入
 **`$DSH_HOME/settings.yaml` 的 `smart-session-title` namespace**；由 DSH 负责原子写入、revision 和文件 watcher。
 没有独立 JSON、sidecar、额外 watcher 或 HTTP 服务。下一次生成实时使用新设置，当前进行中的请求保持开始时的配置。
+设置页页脚显示当前插件版本。
 
 | 字段 | 默认 | 含义 |
 |---|---|---|
@@ -82,7 +87,7 @@ Advanced 展开 timeout/maxAttempts。空值继承 bundle 行配置；其他部�
 ### 批量优化历史标题
 
 同一页面会列出**已存储的会话**及各自当前标题，用于给插件安装之前产生的会话补做标题优化：
-勾选要处理的行（或按项目目录全选）后开始。
+勾选要处理的行（可按项目目录筛选后全选）再开始；单次最多渲染 300 行，历史很多时先用项目目录筛选。
 
 - 每个会话一条 `/retitle`，**严格串行**：N 个会话即 N 次模型调用，不会同时跑两个生成。
 - 被选中的标题会被重写，**包括你手动改过的标题**——显式 `/retitle` 是 DSH 设计上解开人工标题钉住的方式。
@@ -165,6 +170,10 @@ Phase 3 已在隔离真实 DSH runtime 挂载原装 Desktop exporter，确认成
 | greeting remains | 尚无 meaningful task；发送真实任务 |
 | 设置启动失败 | 无效值或未知字段；修正该 namespace，provider 不会部分加载 |
 | 日志文件没有成功记录 | 检查 Desktop logLevel 和正式文件 exporter 是否启用 |
+| 批量时大量旧会话 `model error: upstream failure` | 这些会话记录的 provider/model 已不在 DSH 中，「跟随当前会话模型」对它们必然失败；列表会提前标出，切「指定模型」（或勾选自动兜底）后点「重试失败项」 |
+| 选了「指定模型」但标题仍跟随会话模型 | provider+model 未保存。有可用组合时现在点单选即生效；否则页面会提示「尚未生效」 |
+| 刷新窗口后批次不见了 | 运行器在客户端半：关闭设置页不受影响，但整个窗口刷新会中断；已写入的标题不会回滚 |
+| 点了停止好像没停 | 停止会 abort 在飞的生成；若仍拖住说明 adapter 忽略了取消，按日志里那个会话排查 |
 
 ## 发布内容
 
@@ -175,6 +184,8 @@ Phase 3 已在隔离真实 DSH runtime 挂载原装 Desktop exporter，确认成
 - **REASONING_CONTROL_UNAVAILABLE_CONFIRMED**：没有跨 adapter 的统一 reasoning-disabled 控制。插件不硬塞 `off`，沿用 adapter 默认行为。
 - 某些 reasoning 模型可能用尽 96-token 标题输出预算，正确保留 fallback。
 - Configured 模式的 provider/model 从 DSH 已注册的模型中选择，取不到列表时回退手动输入；设置页与标题按钮文案跟随 DSH 界面语言（中英双语词典，其他语言回退英文）。
+- 批量运行器位于 **Web 客户端半**而非 host：关闭设置页不会中断，但刷新 DSH 窗口会中断；host 半是编译产物且不在本仓库，因此「持久任务队列」与「host 层路由回退」不在范围内。
+- 自动兜底的勾选状态与批次队列不持久化：刷新窗口后回到空闲态（已写入的标题不受影响）。
 - 不做任务漂移自动重命名、快捷键、云同步、遥测、独立数据库或复杂模型管理。
 
 ## 许可证

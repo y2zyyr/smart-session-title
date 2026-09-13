@@ -15,7 +15,11 @@ No separate model setup is required.
 - Waits for a meaningful task when a conversation starts with a greeting.
 - Protects manual titles and prevents automatic title drift.
 - Provides `/retitle` and a header button for explicit regeneration.
-- Adds native settings and local diagnostics, with no telemetry service.
+- **Optimizes titles of your stored sessions in bulk** — pick them from a list,
+  watch a progress bar, and keep the run going (or stop it) after Settings is
+  closed. See [Optimize past titles](#optimize-past-titles).
+- Adds native settings (the page footer shows the running plugin version) and
+  local diagnostics, with no telemetry service.
 
 DSH retains ownership of fallback titles, persistence, projections, cancellation,
 and stale-result protection. This plugin replaces only the title provider.
@@ -86,6 +90,8 @@ The official DSH Settings service persists the `smart-session-title` namespace i
 **`$DSH_HOME/settings.yaml`**, handling atomic writes, revisions, and file watching.
 Changes affect the next generation; an in-flight request keeps its initial policy.
 There is no separate config file, custom watcher, or HTTP server.
+The footer of the page shows the loaded plugin version, so a bug report can name
+the exact build.
 
 | Field | Default | Purpose |
 |---|---|---|
@@ -114,7 +120,9 @@ configuration; deployment-level compression options are in `cordis.patch.yml`.
 
 The same page lists your **stored sessions** with the title each one currently
 has, so you can batch-regenerate titles written before this plugin was installed.
-Pick the rows (or select all within one project) and start the run.
+Pick the rows (filter by project, select all within the current filter), then
+start the run. Up to 300 rows are rendered at once — narrow with the project
+filter for larger histories.
 
 - One `/retitle` per session, **strictly sequential**: a run of N sessions costs
   N model calls and never runs two generations at once.
@@ -235,6 +243,10 @@ provider alongside this plugin. The supplied bundle replaces the built-in one.
 | Greeting remains | No meaningful task yet; send the actual task |
 | Settings prevent startup | Invalid value or unknown field; correct the plugin namespace |
 | No successful generations in log files | Check Desktop log level and its file exporter |
+| Batch: most old sessions fail with `model error: upstream failure` | Those sessions logged a provider/model DSH no longer serves, so "Current session model" cannot work for them. The list flags them before the run; switch to Configured model (or tick the fallback) and use Retry failed |
+| Configured model selected, but titles still follow the session model | The provider+model pair was not saved. With a usable pair the radio now applies it immediately; otherwise the page says the change is not in effect yet |
+| A batch vanished after I reloaded the window | The runner lives in the client half; a full window reload ends it. Titles already written stay |
+| Stop does not seem to end the run | Stop aborts the in-flight generation; if it lingers, the adapter ignored cancellation — check the log for the session that was running |
 
 ## Package contents
 
@@ -250,6 +262,12 @@ Private development reports, session records, and local test fixtures are exclud
   in DSH, and falls back to manual IDs when a provider lists no models. Settings
   and header copy follow the DSH UI language (zh/en dictionaries; other
   languages fall back to English).
+- The batch runner lives in the **Web client half**, not on the host: closing the
+  settings page does not stop a run, but reloading the DSH window does. The host
+  half is compiled and is not part of this repository, so a stored job queue and a
+  host-side route fallback are out of scope.
+- The automatic-fallback preference and the batch queue are not persisted; a
+  reloaded window starts from an idle state (titles already written are permanent).
 - No task-drift retitling, shortcuts, cloud sync, telemetry, custom database, or
   advanced model-management UI.
 
