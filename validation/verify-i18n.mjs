@@ -1825,4 +1825,17 @@ disclosureTree = await settle(capturedExport.BatchTitleOptimizer, { t: tZh, batc
 assert(disclosureTree.props.open === true, "a running batch should expand its controls");
 assert(findFirstElement(disclosureTree, n => n.type === "button" && renderTree(n).join("").includes(tZh("batch.cancel"))), "expanded batch must retain Stop");
 console.log("✓ layout: batch starts collapsed and expands while running with Stop available");
+fakeScopeSnapshot = { status: "ready", writable: true,
+  value: { enabled: true, mode: "configured", provider: "scnet", model: "m", maxTitleCharacters: 25 },
+  user: { mode: "configured", provider: "scnet", model: "m", maxTitleCharacters: 25 } };
+for (const translate of [tZh, tEn]) {
+  const foldedTree = await settle(capturedExport.SettingsSection, { scope, t: translate });
+  const cards = foldedTree.children.filter(n => n?.type === "details");
+  assert(cards.length === 3 && cards.every(n => n.props.open !== true), "model, format and advanced cards must all start collapsed");
+  const summaries = cards.map(n => renderTree(n.children[0]).join(" "));
+  assert(summaries[0].includes("scnet / m"), "model summary must show the saved route");
+  assert(summaries[1].includes("25") && summaries[1].includes(translate("settings.dateAffixOff")), "format summary must show the character cap and date setting");
+  assert(summaries[2].includes(translate("settings.defaultParameters")), "advanced summary must explain inherited defaults");
+}
+console.log("✓ layout: all settings cards collapse with localized saved-setting summaries");
 console.log("\n✅ ALL TESTS PASSED");

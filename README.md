@@ -3,7 +3,7 @@
 English | [简体中文](README.zh-CN.md)
 
 Smarter automatic session titles for **DeepSeek Harness (DSH)**.
-**0.4.0-rc.3 — release candidate**, intended for the npm `next` tag.
+**0.4.0-rc.4 — release candidate**, intended for the npm `next` tag.
 
 ## What it does
 
@@ -313,7 +313,7 @@ verify persisted values after writes. Automatic fallback preserves overall batch
 counts and shows retry progress separately. Stopping it is reported as stopped;
 mode changes observed during fallback are preserved when restoring the route.
 
-The settings page groups model and title-format controls into separate cards.
-Advanced parameters, format explanations, and the batch tool start collapsed;
+The settings page uses four collapsible cards: model, title format, advanced parameters, and batch retitling.
+All four sections start collapsed and show concise saved-setting summaries;
 an active batch opens its controls automatically. The layout adapts to narrow
 windows, and form fields have associated labels and visible keyboard focus.
