@@ -50,7 +50,32 @@ window.__ModuleLoader__.load({
      * The two are kept in sync deliberately: `validation/verify-i18n.mjs`
      * fails when this string and package.json's `version` drift apart.
      */
-    var PLUGIN_VERSION = "0.3.0-rc.3";
+    var PLUGIN_VERSION = "0.3.0-rc.4";
+
+    /**
+     * Where the batch block remembers its automatic-fallback checkbox. It is a
+     * UI preference, not plugin configuration: `settings.yaml` is a host-owned
+     * schema this client half may not extend, so it stays in the browser.
+     */
+    var BATCH_FALLBACK_STORAGE_KEY = "smart-session-title.batch.autoFallback";
+
+    /** Read the remembered fallback preference (false when unavailable). */
+    function readFallbackPreference() {
+      try {
+        return window.localStorage.getItem(BATCH_FALLBACK_STORAGE_KEY) === "1";
+      } catch (error) {
+        return false;
+      }
+    }
+
+    /** Remember the fallback preference; storage failures are not fatal. */
+    function writeFallbackPreference(enabled) {
+      try {
+        window.localStorage.setItem(BATCH_FALLBACK_STORAGE_KEY, enabled ? "1" : "0");
+      } catch (error) {
+        // Private mode / disabled storage: the checkbox still works for this page.
+      }
+    }
 
     /** Muted helper-text style shared by the settings blocks. */
     var HINT_STYLE = {
@@ -102,7 +127,15 @@ window.__ModuleLoader__.load({
       "batch.costHint": "每个会话一次模型调用：选得越多越慢，并产生相应的模型费用。",
       "batch.routeHint": "「跟随当前会话模型」会使用每个会话自己记录的模型；旧会话记录的模型可能已不存在或凭据失效，此时改成「指定模型」再重试即可。",
       "batch.retryFailed": "重试失败项",
+      "batch.fallback": "失败后自动用「指定模型」重跑一次",
+      "batch.fallbackHint": "仅在已保存「指定模型」时可用：重跑期间标题路由会临时切到该模型，结束后自动恢复原设置（中途刷新窗口可能停在切换后的状态）。",
+      "batch.fallbackNeedsRoute": "先在「标题模型」里选好并保存「指定模型」，才能启用自动兜底。",
+      "batch.fallbackRunning": "正在用「指定模型」自动重跑失败项…",
+      "batch.fallbackDone": "已用「指定模型」自动重跑失败项。",
+      "batch.fallbackFailed": "自动兜底未执行（可能没有可用的指定模型）。",
       "batch.routeInUse": "本次使用的标题路由",
+      "batch.routeDead": "记录模型已不可用",
+      "batch.routeDeadSummary": "以下会话记录的模型已不在 DSH 中（跟随当前会话模型时它们必然失败，切到指定模型再重试）",
       "batch.load": "加载历史会话",
       "batch.reload": "重新加载",
       "batch.loading": "正在加载历史会话…",
@@ -177,7 +210,15 @@ window.__ModuleLoader__.load({
       "batch.costHint": "One model call per session: the more you select, the slower and the more expensive the run.",
       "batch.routeHint": "\"Current session model\" uses the model each session logged. For old sessions that model may no longer exist or its credentials may be gone; switch to \"Configured model\" and retry.",
       "batch.retryFailed": "Retry failed",
+      "batch.fallback": "On failure, retry once with the configured model",
+      "batch.fallbackHint": "Needs a saved configured model: the title route switches to it for the retry and is restored afterwards (an interrupted window can leave it switched).",
+      "batch.fallbackNeedsRoute": "Save a configured model first to enable the automatic fallback.",
+      "batch.fallbackRunning": "Retrying the failed sessions with the configured model…",
+      "batch.fallbackDone": "Failed sessions were retried with the configured model.",
+      "batch.fallbackFailed": "Automatic fallback did not run (no usable configured model?).",
       "batch.routeInUse": "Title route in use",
+      "batch.routeDead": "logged model unavailable",
+      "batch.routeDeadSummary": "Sessions below log a model DSH no longer serves (they cannot succeed while following the session model; switch to a configured model and retry)",
       "batch.load": "Load past sessions",
       "batch.reload": "Reload",
       "batch.loading": "Loading past sessions…",
@@ -329,8 +370,62 @@ window.__ModuleLoader__.load({
       if (!Array.isArray(items)) return out;
       for (var index = 0; index < items.length; index += 1) {
         if (isBatchCandidate(items[index])) out.push(items[index]);
+      }      return out;
+    }
+
+    /**
+     * The model route one stored session logged last, read from the
+     * `modelSelection` projection that `session.list` already carries
+     * (`values.modelSelection.lastUsed.{provider,model}`, falling back to the
+     * queued `next` selection).
+     *
+     * This is what "Current session model" mode will actually use for that
+     * session, so the batch list can warn BEFORE the run instead of reporting
+     * N identical failures afterwards.
+     */
+    function routeOfSessionRow(row) {
+      var values = row !== null && row !== undefined && row.projections !== undefined
+        ? row.projections.values
+        : undefined;
+      var selection = values !== undefined && values !== null ? values.modelSelection : undefined;
+      if (selection === undefined || selection === null) return undefined;
+      var candidate = selection.lastUsed !== null && selection.lastUsed !== undefined
+        ? selection.lastUsed
+        : selection.next;
+      if (candidate === null || candidate === undefined) return undefined;
+      if (typeof candidate.provider !== "string" || typeof candidate.model !== "string") return undefined;
+      return { provider: candidate.provider, model: candidate.model };
+    }
+
+    /**
+     * Whether a session's logged route can still be served.
+     *
+     * @param route - `routeOfSessionRow(row)` or undefined.
+     * @param catalog - the DSH provider directory (`loadModelCatalog` result).
+     * @returns `"unknown"` (no route/directory to judge with), `"provider-missing"`
+     *   (the provider is gone — the observed failure mode), `"model-missing"`
+     *   (provider known but the model is not among its configured models), or `"ok"`.
+     */
+    function classifySessionRoute(route, catalog) {
+      if (route === undefined || route === null || route.provider === "") return "unknown";
+      if (catalog === undefined || catalog === null || !Array.isArray(catalog.providers)) return "unknown";
+      if (catalog.providers.length === 0) return "unknown";
+      var known = false;
+      for (var index = 0; index < catalog.providers.length; index += 1) {
+        if (catalog.providers[index].id === route.provider) {
+          known = true;
+          break;
+        }
       }
-      return out;
+      if (!known) return "provider-missing";
+      var models = modelsForProvider(catalog, route.provider);
+      if (models.length > 0 && models.indexOf(route.model) === -1) return "model-missing";
+      return "ok";
+    }
+
+    /** Tight label for a session's logged route, e.g. `opencode-go/deepseek-v4`. */
+    function routeLabelOf(route) {
+      return route === undefined || route === null ? "" : route.provider + "/" + route.model;
     }
 
     /** Reset value of the batch runner's snapshot. */
@@ -343,7 +438,10 @@ window.__ModuleLoader__.load({
         failed: 0,
         currentSessionId: "",
         failures: [],
-        cancelRequested: false
+        cancelRequested: false,
+        // "idle" | "running" | "done" | "failed": the optional second pass that
+        // re-runs the failures with the configured route.
+        fallback: "idle"
       };
     }
 
@@ -363,12 +461,20 @@ window.__ModuleLoader__.load({
      * finished keeps the title it wrote.
      *
      * @param execute - `(sessionId) => Promise<outcome>`: the `/retitle` route.
+     * @param hooks - optional `{ runFallback }`. `runFallback(failures, runPass)`
+     *   is called ONCE after a run that had failures, when the user enabled the
+     *   automatic fallback. It owns switching the title route (plugin scope holds
+     *   the settings scope) and must await `runPass(rows)`, then restore. Without
+     *   this hook — and without a saved configured route — no second pass runs.
      */
-    function createBatchController(execute) {
+    function createBatchController(execute, hooks) {
+      var runFallbackHook = hooks !== undefined && hooks !== null ? hooks.runFallback : undefined;
       var listeners = [];
       var state = idleBatchSnapshot();
       var cancelled = false;
       var inflight = null;
+      var autoFallback = false;
+      var fallbackAttempted = false;
 
       function emit(patch) {
         state = Object.assign({}, state, patch);
@@ -417,6 +523,75 @@ window.__ModuleLoader__.load({
           });
       }
 
+      /** Deduplicate rows into the queue one pass will run. */
+      function buildQueue(rows) {
+        var queue = [];
+        var seen = {};
+        for (var index = 0; index < (rows || []).length; index += 1) {
+          var row = rows[index];
+          var id = row !== null && row !== undefined ? row.sessionId : undefined;
+          if (typeof id !== "string" || id.length === 0 || seen[id] === true) continue;
+          seen[id] = true;
+          queue.push({ sessionId: id, title: titleOfSessionRow(row) });
+        }
+        return queue;
+      }
+
+      /** Run one pass over `queue`, resetting the counters. */
+      function runPass(queue) {
+        emit({
+          status: "running",
+          total: queue.length,
+          completed: 0,
+          succeeded: 0,
+          failed: 0,
+          currentSessionId: queue[0].sessionId,
+          failures: [],
+          cancelRequested: false
+        });
+        return step(queue, 0).then(function () {
+          emit({
+            status: cancelled ? "cancelled" : "done",
+            currentSessionId: "",
+            cancelRequested: false
+          });
+          return state;
+        });
+      }
+
+      /** Should this finished pass trigger the one allowed fallback pass? */
+      function shouldFallback(result) {
+        return autoFallback === true &&
+          fallbackAttempted === false &&
+          cancelled === false &&
+          typeof runFallbackHook === "function" &&
+          result.failed > 0 &&
+          result.failures.length > 0;
+      }
+
+      /** Second pass: the hook switches the route, runs the failures, restores. */
+      function beginFallback(result) {
+        fallbackAttempted = true;
+        var failed = result.failures.map(function (failure) {
+          return { sessionId: failure.sessionId };
+        });
+        emit({ fallback: "running" });
+        return Promise.resolve()
+          .then(function () {
+            return runFallbackHook(failed, function (rows) {
+              return runPass(buildQueue(rows));
+            });
+          })
+          .then(
+            function () {
+              emit({ fallback: "done" });
+            },
+            function () {
+              emit({ fallback: "failed" });
+            }
+          );
+      }
+
       return {
         /** Observe progress; returns the unsubscribe function. */
         subscribe: function (listener) {
@@ -434,18 +609,17 @@ window.__ModuleLoader__.load({
         isRunning: function () {
           return inflight !== null;
         },
+        /** Enable/disable the single automatic fallback pass. */
+        setAutoFallback: function (enabled) {
+          autoFallback = enabled === true;
+        },
+        /** Whether the automatic fallback pass is enabled. */
+        isAutoFallback: function () {
+          return autoFallback;
+        },
         /** Number of sessions a `start` with these rows would actually run. */
         countRunnable: function (rows) {
-          var seen = {};
-          var count = 0;
-          for (var index = 0; index < (rows || []).length; index += 1) {
-            var row = rows[index];
-            var id = row !== null && row !== undefined ? row.sessionId : undefined;
-            if (typeof id !== "string" || id.length === 0 || seen[id] === true) continue;
-            seen[id] = true;
-            count += 1;
-          }
-          return count;
+          return buildQueue(rows).length;
         },
         /**
          * Run one batch. Joins an in-flight run instead of starting a second.
@@ -454,53 +628,40 @@ window.__ModuleLoader__.load({
          */
         start: function (rows) {
           if (inflight !== null) return inflight;
-          var queue = [];
-          var seen = {};
-          for (var index = 0; index < (rows || []).length; index += 1) {
-            var row = rows[index];
-            var id = row !== null && row !== undefined ? row.sessionId : undefined;
-            if (typeof id !== "string" || id.length === 0 || seen[id] === true) continue;
-            seen[id] = true;
-            queue.push({ sessionId: id, title: titleOfSessionRow(row) });
-          }
+          var queue = buildQueue(rows);
           if (queue.length === 0) return Promise.resolve(state);
           cancelled = false;
-          emit({
-            status: "running",
-            total: queue.length,
-            completed: 0,
-            succeeded: 0,
-            failed: 0,
-            currentSessionId: queue[0].sessionId,
-            failures: [],
-            cancelRequested: false
-          });
-          inflight = step(queue, 0).then(
-            function () {
-              inflight = null;
-              emit({
-                status: cancelled ? "cancelled" : "done",
-                currentSessionId: "",
-                cancelRequested: false
-              });
-              return state;
-            },
-            function (error) {
-              inflight = null;
-              emit({ status: "done", currentSessionId: "", cancelRequested: false });
-              throw error;
-            }
-          );
+          // A user-initiated run re-arms the fallback; the fallback pass itself
+          // runs through `runPass` and can never re-arm it.
+          fallbackAttempted = false;
+          emit({ fallback: "idle" });
+          inflight = runPass(queue)
+            .then(function (result) {
+              return shouldFallback(result) ? beginFallback(result) : undefined;
+            })
+            .then(
+              function () {
+                inflight = null;
+                return state;
+              },
+              function (error) {
+                inflight = null;
+                emit({ status: "done", currentSessionId: "", cancelRequested: false });
+                throw error;
+              }
+            );
           return inflight;
         },
         /**
          * Stop after the session currently in flight: the Remote command call
          * carries no cancellation signal, so the running session is allowed to
          * finish (and keep its new title) instead of being abandoned mid-write.
+         * A pending automatic fallback is dropped rather than started.
          */
         cancel: function () {
           if (inflight === null || cancelled) return;
           cancelled = true;
+          fallbackAttempted = true;
           emit({ cancelRequested: true });
         }
       };
@@ -810,9 +971,59 @@ window.__ModuleLoader__.load({
       // Batch runner, created in plugin scope so a run survives the settings
       // page being closed. It drives the SAME `/retitle` command route as the
       // header button; the host resumes each stored Session on demand.
-      var batch = createBatchController(function (sessionId) {
-        return ctx.remote.commands.execute(sessionId, RETITLE_LINE, []);
-      });
+      // The settings scope must exist before the fallback hook can use it (the
+      // hook itself only runs once a batch has failures).
+      var settingsScope = ctx.settingsScope.bind({ namespace: NS });
+
+      var batch = createBatchController(
+        function (sessionId) {
+          return ctx.remote.commands.execute(sessionId, RETITLE_LINE, []);
+        },
+        {
+          /**
+           * Automatic fallback, opted into by the user in the batch block.
+           *
+           * "Current session model" uses each stored session's logged model, and a
+           * session from months ago may name a provider DSH no longer serves — it
+           * then fails in milliseconds, every time. A true host-side route
+           * fallback would live in `resolveTitleRoute` (host half, compiled), so
+           * the client does the next best thing with the public settings scope:
+           * switch the title route to the saved configured pair for ONE retry pass
+           * over exactly the failed sessions, then put the previous mode back.
+           *
+           * The write is real (it is the same field the user edits in Settings),
+           * which is why it is opt-in, one-shot, and restored — and why an
+           * interrupted window can leave the route switched; the setting is
+           * visible in the UI, never hidden.
+           */
+          runFallback: function (failures, runPass) {
+            var snapshot = settingsScope.getSnapshot();
+            var value = snapshot !== undefined && snapshot !== null && snapshot.status === "ready"
+              ? snapshot.value || {}
+              : {};
+            var provider = typeof value.provider === "string" ? value.provider : "";
+            var model = typeof value.model === "string" ? value.model : "";
+            if (provider === "" || model === "") {
+              return Promise.reject(new Error("no configured title route to fall back to"));
+            }
+            var previousMode = value.mode;
+            function restore() {
+              return previousMode === undefined
+                ? Promise.resolve(settingsScope.unset("mode"))
+                : Promise.resolve(settingsScope.set("mode", previousMode));
+            }
+            return Promise.resolve(settingsScope.set("mode", "configured"))
+              .then(function () {
+                return runPass(failures);
+              })
+              .then(restore, function (error) {
+                return restore().then(function () {
+                  throw error;
+                });
+              });
+          }
+        }
+      );
       ctx.effect(
         function () {
           return function () {
@@ -838,8 +1049,7 @@ window.__ModuleLoader__.load({
 
       // The settings page binds this plugin's own namespace scope through the
       // settings domain's base service — the documented route for a feature that
-      // owns a preference.
-      var settingsScope = ctx.settingsScope.bind({ namespace: NS });
+      // owns a preference. (Bound above, because the batch fallback needs it too.)
       ctx.slots.inject("settings.section", function () {
         return ctx.slots.register(
           {
@@ -1425,7 +1635,10 @@ window.__ModuleLoader__.load({
             mode: effectiveMode,
             provider: value.provider || "",
             model: value.model || ""
-          }
+          },
+          // Provider directory: lets the list flag sessions whose logged model is
+          // gone before the run instead of after it fails.
+          catalog: catalog
         })
       );
 
@@ -1454,6 +1667,9 @@ window.__ModuleLoader__.load({
       var batch = props.batch;
       var listSessions = props.listSessions;
       var aiDisabled = props.disabled === true;
+      // DSH's provider directory, used to warn about sessions whose logged model
+      // no longer exists — before the run, not after thirteen failures.
+      var catalog = props.catalog;
 
       // `undefined` = not loaded yet, `null` = load failed, array = loaded rows.
       var rowsPair = react.useState(undefined);
@@ -1473,6 +1689,11 @@ window.__ModuleLoader__.load({
       });
       var snap = snapPair[0];
       var setSnap = snapPair[1];
+      // Remembered across page loads (browser storage, not plugin settings — see
+      // BATCH_FALLBACK_STORAGE_KEY), so a user who wants the fallback keeps it.
+      var fallbackPair = react.useState(readFallbackPreference);
+      var autoFallback = fallbackPair[0];
+      var setAutoFallback = fallbackPair[1];
 
       var mounted = react.useRef(true);
       var lastStatus = react.useRef(snap.status);
@@ -1492,6 +1713,12 @@ window.__ModuleLoader__.load({
         },
         [batch]
       );
+
+      // The runner owns the flag (it may fire the fallback pass long after this
+      // page is closed), so keep it in step with the remembered preference.
+      react.useEffect(function () {
+        if (batch !== undefined) batch.setAutoFallback(autoFallback);
+      }, [batch, autoFallback]);
 
       function load() {
         if (listSessions === undefined) return;
@@ -1576,6 +1803,13 @@ window.__ModuleLoader__.load({
       if (truncated) visible = visible.slice(0, ROW_LIMIT);
       var selectedRows = list.filter(function (row) { return selected[row.sessionId] === true; });
       var canStart = !running && !aiDisabled && selectedRows.length > 0;
+      // How many of the rows on screen are doomed in "Current session model"
+      // mode because DSH no longer serves the model they logged.
+      var deadRoutes = 0;
+      for (var deadIndex = 0; deadIndex < visible.length; deadIndex += 1) {
+        var deadStatus = classifySessionRoute(routeOfSessionRow(visible[deadIndex]), catalog);
+        if (deadStatus === "provider-missing" || deadStatus === "model-missing") deadRoutes += 1;
+      }
 
       var children = [];
 
@@ -1606,6 +1840,44 @@ window.__ModuleLoader__.load({
             "p",
             { key: "route-in-use", style: Object.assign({ marginTop: 0, marginBottom: 8 }, HINT_STYLE) },
             t("batch.routeInUse") + ": " + routeText
+          )
+        );
+        // Automatic fallback opt-in. It needs a SAVED configured pair, because
+        // that is the route the retry pass switches to.
+        var fallbackReady = props.route.provider !== "" && props.route.model !== "";
+        children.push(
+          react.createElement(
+            "label",
+            {
+              key: "fallback",
+              style: {
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 12,
+                marginBottom: 2,
+                cursor: fallbackReady && !running ? "pointer" : "default"
+              }
+            },
+            react.createElement("input", {
+              type: "checkbox",
+              checked: autoFallback,
+              disabled: !fallbackReady || running,
+              onChange: function (event) {
+                var next = event.target.checked;
+                setAutoFallback(next);
+                writeFallbackPreference(next);
+                if (batch !== undefined) batch.setAutoFallback(next);
+              }
+            }),
+            t("batch.fallback")
+          )
+        );
+        children.push(
+          react.createElement(
+            "p",
+            { key: "fallback-hint", style: Object.assign({ marginTop: 0, marginBottom: 8 }, HINT_STYLE) },
+            fallbackReady ? t("batch.fallbackHint") : t("batch.fallbackNeedsRoute")
           )
         );
       }
@@ -1705,6 +1977,18 @@ window.__ModuleLoader__.load({
           )
         );
 
+        // Say it up front: these sessions record a model DSH no longer serves, so
+        // in "Current session model" mode they can only fail.
+        if (deadRoutes > 0) {
+          children.push(
+            react.createElement(
+              "p",
+              { key: "dead-routes", role: "status", style: Object.assign({ marginTop: 0, marginBottom: 6 }, HINT_STYLE) },
+              "⚠ " + t("batch.routeDeadSummary") + ": " + String(deadRoutes) + " / " + String(visible.length)
+            )
+          );
+        }
+
         children.push(
           react.createElement(
             "div",
@@ -1721,9 +2005,22 @@ window.__ModuleLoader__.load({
             },
             visible.map(function (row) {
               var title = titleOfSessionRow(row);
+              var rowRoute = routeOfSessionRow(row);
+              var routeStatus = classifySessionRoute(rowRoute, catalog);
               var meta = [];
               if (typeof row.cwd === "string" && row.cwd !== "") meta.push(row.cwd);
               if (typeof row.updatedAt === "number") meta.push(new Date(row.updatedAt).toLocaleString());
+              // The model this session would use in "Current session model" mode —
+              // flagged when DSH no longer knows it, which is the whole reason a
+              // batch of old sessions fails.
+              if (rowRoute !== undefined) {
+                meta.push(
+                  routeLabelOf(rowRoute) +
+                    (routeStatus === "provider-missing" || routeStatus === "model-missing"
+                      ? " ⚠ " + t("batch.routeDead")
+                      : "")
+                );
+              }
               if (row.running === true) meta.push(t("batch.runningBadge"));
               return react.createElement(
                 "label",
@@ -1874,6 +2171,19 @@ window.__ModuleLoader__.load({
             snap.cancelRequested === true && running
               ? react.createElement("p", { style: HINT_STYLE }, t("batch.cancelling"))
               : null,
+            snap.fallback === "running"
+              ? react.createElement("p", { role: "status", style: HINT_STYLE }, t("batch.fallbackRunning"))
+              : null,
+            snap.fallback === "done"
+              ? react.createElement(
+                  "p",
+                  { role: "status", style: HINT_STYLE },
+                  t("batch.fallbackDone") + " (" + t("settings.modeConfigured") + ")"
+                )
+              : null,
+            snap.fallback === "failed"
+              ? react.createElement("p", { role: "status", style: HINT_STYLE }, t("batch.fallbackFailed"))
+              : null,
             running && snap.currentSessionId !== ""
               ? react.createElement(
                   "p",
@@ -1918,6 +2228,8 @@ window.__ModuleLoader__.load({
   exports.selectBatchCandidates = selectBatchCandidates;
   exports.isBatchCandidate = isBatchCandidate;
   exports.titleOfSessionRow = titleOfSessionRow;
+  exports.routeOfSessionRow = routeOfSessionRow;
+  exports.classifySessionRoute = classifySessionRoute;
   return module.exports;
   }
 });

@@ -3,7 +3,7 @@
 English | [简体中文](README.zh-CN.md)
 
 Smarter automatic session titles for **DeepSeek Harness (DSH)**.
-**0.3.0-rc.3 — release candidate**, intended for the npm `next` tag.
+**0.3.0-rc.4 — release candidate**, intended for the npm `next` tag.
 
 ## What it does
 
@@ -135,6 +135,15 @@ Pick the rows (or select all within one project) and start the run.
   logged, and an old session may name a provider/model that no longer exists or
   whose credentials are gone — those fail within milliseconds. Switch to
   **Configured model**, pick a working pair, then use **Retry failed**.
+- The list shows each session's **logged model** (from DSH's `modelSelection`
+  projection) and flags the ones DSH no longer serves, with a count, *before*
+  the run: those sessions cannot succeed while following the session model.
+- **Automatic fallback** (opt-in, off by default): with a saved configured model,
+  a finished run retries exactly the failed sessions once on that configured
+  route, then restores the previous title mode. The switch is a real settings
+  write for the duration of the retry, so it stays off unless you ask for it.
+  The checkbox itself is remembered in browser storage, not in `settings.yaml`:
+  that schema is host-owned and the client half may not extend it.
 
 ## Model modes
 
