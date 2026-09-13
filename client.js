@@ -42,6 +42,16 @@ window.__ModuleLoader__.load({
     /** The command line the host understands. */
     var RETITLE_LINE = "/retitle";
 
+    /**
+     * This plugin's version, shown in the settings page footer.
+     *
+     * This half is hand-written (see the file header), so no build step can
+     * inject the value from package.json the way a bundled client half does.
+     * The two are kept in sync deliberately: `validation/verify-i18n.mjs`
+     * fails when this string and package.json's `version` drift apart.
+     */
+    var PLUGIN_VERSION = "0.2.0-rc.1";
+
     /** Simplified Chinese dictionary (the key-set source of truth). */
     var zh = {
       // Header action ----------------------------------------------
@@ -75,7 +85,8 @@ window.__ModuleLoader__.load({
       "settings.advanced": "高级",
       "settings.timeout": "超时（毫秒）",
       "settings.maxAttempts": "最大尝试次数",
-      "settings.advancedHint": "留空表示继承部署的 composition 配置。改动作用于下一次标题生成；凭据仍由 DSH 管理。"
+      "settings.advancedHint": "留空表示继承部署的 composition 配置。改动作用于下一次标题生成；凭据仍由 DSH 管理。",
+      "settings.version": "版本"
     };
 
     /** English dictionary, key-identical to the Chinese source of truth. */
@@ -111,7 +122,8 @@ window.__ModuleLoader__.load({
       "settings.advanced": "Advanced",
       "settings.timeout": "Timeout (ms)",
       "settings.maxAttempts": "Max attempts",
-      "settings.advancedHint": "An empty field inherits the deployment's composition config. Changes apply to the next title generation; credentials stay managed by DSH."
+      "settings.advancedHint": "An empty field inherits the deployment's composition config. Changes apply to the next title generation; credentials stay managed by DSH.",
+      "settings.version": "Version"
     };
 
     /**
@@ -325,6 +337,31 @@ window.__ModuleLoader__.load({
       return Object.assign({ width: "100%" }, fieldStyle);
     }
 
+    /**
+     * Version footer — rendered at the end of the settings page, and also under
+     * the "settings unavailable" notice, where knowing which build is loaded
+     * matters most for a bug report.
+     *
+     * @param t - the slot's translator (see `translatorOf`).
+     */
+    function versionFooter(t) {
+      return react.createElement(
+        "p",
+        {
+          key: "version",
+          style: {
+            marginTop: 16,
+            marginBottom: 0,
+            paddingTop: 8,
+            borderTop: "1px solid var(--dsw-alias-border-l4)",
+            fontSize: 12,
+            color: "var(--dsw-alias-label-tertiary)"
+          }
+        },
+        t("settings.version") + " v" + PLUGIN_VERSION
+      );
+    }
+
     function RegenerateTitleAction(props) {
       var sessionId = props.sessionId;
       var regenerate = props.regenerate;
@@ -507,6 +544,7 @@ window.__ModuleLoader__.load({
     exports.apply = apply;
     exports.NS = NS;
     exports.RETITLE_LINE = RETITLE_LINE;
+    exports.PLUGIN_VERSION = PLUGIN_VERSION;
     // Testable seams: the transports and the in-flight guard are exercised by
     // tests/client.test.mjs against a stub module loader.
     exports.createRegenerationController = createRegenerationController;
@@ -604,10 +642,17 @@ window.__ModuleLoader__.load({
       );
 
       if (snap.status === "unavailable") {
-        return jsxRuntime.jsx("p", {
-          style: { fontSize: 13, color: "var(--dsw-alias-label-tertiary)" },
-          children: t("settings.unavailable")
-        });
+        return react.createElement("div", {}, [
+          react.createElement(
+            "p",
+            {
+              key: "unavailable",
+              style: { fontSize: 13, color: "var(--dsw-alias-label-tertiary)" }
+            },
+            t("settings.unavailable")
+          ),
+          versionFooter(t)
+        ]);
       }
       if (snap.status !== "ready") {
         return jsxRuntime.jsx("p", {
@@ -969,6 +1014,9 @@ window.__ModuleLoader__.load({
             : null
         )
       );
+
+      // Which build is loaded — the first thing a bug report needs.
+      children.push(versionFooter(t));
 
       return react.createElement("div", {}, children);
     }
