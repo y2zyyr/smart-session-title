@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-DeepSeek Harness 会话智能标题插件。**0.2.0-rc.3 — 发布候选版本**，npm 标签为 `next`。
+DeepSeek Harness 会话智能标题插件。**0.3.0-rc.1 — 发布候选版本**，npm 标签为 `next`。
 
 ## 功能
 
@@ -76,6 +76,18 @@ Web 端需要 DSH 原生 slots、locale、settingsScope 和 Remote commands。
 选择 Configured model 后，先填完整 provider/model，再点击 **Save configured model**，一次提交完整路由。
 ID 来自 DSH 的 Models 页面；本插件没有模型浏览器，也不接受凭据字段。
 Advanced 展开 timeout/maxAttempts。空值继承 bundle 行配置；其他部署级压缩参数见 `cordis.patch.yml`。
+
+### 批量优化历史标题
+
+同一页面会列出**已存储的会话**及各自当前标题，用于给插件安装之前产生的会话补做标题优化：
+勾选要处理的行（或按项目目录全选）后开始。
+
+- 每个会话一条 `/retitle`，**严格串行**：N 个会话即 N 次模型调用，不会同时跑两个生成。
+- 被选中的标题会被重写，**包括你手动改过的标题**——显式 `/retitle` 是 DSH 设计上解开人工标题钉住的方式。
+- 没有可用用户消息的会话与子代理会话会被跳过（前者无内容可生成，后者 host 拒绝恢复）。
+- 进度（已完成 / 成功 / 失败）由插件作用域的运行器持有，而不是页面状态：**关闭设置页不会中断批次**，
+  重新打开设置页会继续显示实时进度。只有刷新整个 DSH 窗口才会中断；已完成会话的新标题都已落盘。
+  取消在「当前正在处理的会话」完成后生效——Remote 命令调用本身不带取消信号。
 
 ## 模型模式
 

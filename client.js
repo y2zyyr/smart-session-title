@@ -50,7 +50,15 @@ window.__ModuleLoader__.load({
      * The two are kept in sync deliberately: `validation/verify-i18n.mjs`
      * fails when this string and package.json's `version` drift apart.
      */
-    var PLUGIN_VERSION = "0.2.0-rc.3";
+    var PLUGIN_VERSION = "0.3.0-rc.1";
+
+    /** Muted helper-text style shared by the settings blocks. */
+    var HINT_STYLE = {
+      fontSize: 12,
+      color: "var(--dsw-alias-label-tertiary)",
+      margin: 0,
+      lineHeight: 1.4
+    };
 
     /** Simplified Chinese dictionary (the key-set source of truth). */
     var zh = {
@@ -86,7 +94,41 @@ window.__ModuleLoader__.load({
       "settings.timeout": "超时（毫秒）",
       "settings.maxAttempts": "最大尝试次数",
       "settings.advancedHint": "留空表示继承部署的 composition 配置。改动作用于下一次标题生成；凭据仍由 DSH 管理。",
-      "settings.version": "版本"
+      "settings.version": "版本",
+      // Batch: optimize past titles ---------------------------------
+      "batch.legend": "批量优化历史标题",
+      "batch.intro": "选中要重新生成标题的历史会话。每个会话调用一次模型；被选中的标题会被重写，包括你手动改过的标题。",
+      "batch.costHint": "每个会话一次模型调用：选得越多越慢，并产生相应的模型费用。",
+      "batch.load": "加载历史会话",
+      "batch.reload": "重新加载",
+      "batch.loading": "正在加载历史会话…",
+      "batch.loadFailed": "无法读取历史会话列表。",
+      "batch.unavailable": "当前浏览器无法读取历史会话。",
+      "batch.empty": "没有可处理的历史会话（无用户消息或子代理会话会被跳过）。",
+      "batch.count": "可处理会话",
+      "batch.cwd": "项目目录",
+      "batch.allCwd": "全部项目",
+      "batch.selectAll": "全选",
+      "batch.clear": "清空",
+      "batch.selectedCount": "已选",
+      "batch.start": "开始优化",
+      "batch.cancel": "取消",
+      "batch.cancelling": "正在取消，当前会话完成后停止…",
+      "batch.status": "状态",
+      "batch.running": "正在优化",
+      "batch.done": "已完成",
+      "batch.cancelled": "已取消",
+      "batch.completedCount": "已完成",
+      "batch.okCount": "成功",
+      "batch.failedCount": "失败",
+      "batch.current": "当前",
+      "batch.runningBadge": "运行中",
+      "batch.noTitle": "（无标题）",
+      "batch.disabled": "AI 标题已关闭，无法批量优化。",
+      "batch.truncated": "仅显示前 300 条，请先用项目目录筛选。",
+      "batch.failures": "失败的会话",
+      "batch.kindError": "生成失败",
+      "batch.kindUnavailable": "命令不可用"
     };
 
     /** English dictionary, key-identical to the Chinese source of truth. */
@@ -123,7 +165,41 @@ window.__ModuleLoader__.load({
       "settings.timeout": "Timeout (ms)",
       "settings.maxAttempts": "Max attempts",
       "settings.advancedHint": "An empty field inherits the deployment's composition config. Changes apply to the next title generation; credentials stay managed by DSH.",
-      "settings.version": "Version"
+      "settings.version": "Version",
+      // Batch: optimize past titles ---------------------------------
+      "batch.legend": "Optimize past titles",
+      "batch.intro": "Pick the past sessions to retitle. Each one costs one model call; the selected titles are rewritten, including titles you renamed by hand.",
+      "batch.costHint": "One model call per session: the more you select, the slower and the more expensive the run.",
+      "batch.load": "Load past sessions",
+      "batch.reload": "Reload",
+      "batch.loading": "Loading past sessions…",
+      "batch.loadFailed": "Could not read the past-session list.",
+      "batch.unavailable": "Past sessions are not readable in this browser.",
+      "batch.empty": "No past sessions to optimize (sessions without a user message and subagent sessions are skipped).",
+      "batch.count": "Sessions available",
+      "batch.cwd": "Project",
+      "batch.allCwd": "All projects",
+      "batch.selectAll": "Select all",
+      "batch.clear": "Clear",
+      "batch.selectedCount": "Selected",
+      "batch.start": "Start",
+      "batch.cancel": "Cancel",
+      "batch.cancelling": "Cancelling; stops after the current session…",
+      "batch.status": "Status",
+      "batch.running": "Optimizing",
+      "batch.done": "Finished",
+      "batch.cancelled": "Cancelled",
+      "batch.completedCount": "Completed",
+      "batch.okCount": "Succeeded",
+      "batch.failedCount": "Failed",
+      "batch.current": "Current",
+      "batch.runningBadge": "running",
+      "batch.noTitle": "(no title)",
+      "batch.disabled": "AI titles are off; batch optimization is unavailable.",
+      "batch.truncated": "Only the first 300 rows are shown; narrow the list with the project filter.",
+      "batch.failures": "Failed sessions",
+      "batch.kindError": "generation failed",
+      "batch.kindUnavailable": "command unavailable"
     };
 
     /**
@@ -183,6 +259,213 @@ window.__ModuleLoader__.load({
       var result = outcome.result;
       if (result !== undefined && result.kind === "success") return { kind: "success" };
       return { kind: "error" };
+    }
+
+    /** Accepted title of one `session.list` row ("" when it has none yet). */
+    function titleOfSessionRow(row) {
+      var values = row !== null && row !== undefined && row.projections !== undefined
+        ? row.projections.values
+        : undefined;
+      var title = values !== undefined && values !== null ? values.title : undefined;
+      return typeof title === "string" ? title : "";
+    }
+
+    /**
+     * Whether one `session.list` row may be batch-retitled.
+     *
+     * Excluded, each for a verified host-side reason:
+     *  - subagent / child sessions: the `agent` lookup refuses to resume a
+     *    subagent-owned Session into an ordinary Agent
+     *    (`hasApiSessionSubagentOwner` → ownership error);
+     *  - blank sessions: no eligible `user/message`, so `/retitle` can only
+     *    fail with "no usable user message";
+     *  - rows without an id: nothing to address.
+     */
+    function isBatchCandidate(row) {
+      if (row === null || row === undefined || typeof row !== "object") return false;
+      if (typeof row.sessionId !== "string" || row.sessionId.length === 0) return false;
+      if (row.origin === "subagent" || row.parentSessionId !== undefined) return false;
+      if (row.blank === true) return false;
+      return true;
+    }
+
+    /** Keep only the retitleable rows, preserving the host's ordering. */
+    function selectBatchCandidates(items) {
+      var out = [];
+      if (!Array.isArray(items)) return out;
+      for (var index = 0; index < items.length; index += 1) {
+        if (isBatchCandidate(items[index])) out.push(items[index]);
+      }
+      return out;
+    }
+
+    /** Reset value of the batch runner's snapshot. */
+    function idleBatchSnapshot() {
+      return {
+        status: "idle",
+        total: 0,
+        completed: 0,
+        succeeded: 0,
+        failed: 0,
+        currentSessionId: "",
+        failures: [],
+        cancelRequested: false
+      };
+    }
+
+    /**
+     * Runner for "optimize past titles".
+     *
+     * Sequential by design — one `/retitle` at a time — so a run of N sessions
+     * costs exactly N model calls and cannot stampede the provider. Every step
+     * goes through the same public Remote the header button uses
+     * (`ctx.remote.commands.execute(sessionId, "/retitle")`), whose host side
+     * resumes a cold Session on demand before running the real command handler.
+     *
+     * The runner lives in plugin scope (created once in `apply`), NOT in React
+     * state: closing the settings page unmounts the component but leaves the run
+     * going, and reopening the page re-subscribes to this snapshot. Only a full
+     * DSH window reload can interrupt a run — and each session that already
+     * finished keeps the title it wrote.
+     *
+     * @param execute - `(sessionId) => Promise<outcome>`: the `/retitle` route.
+     */
+    function createBatchController(execute) {
+      var listeners = [];
+      var state = idleBatchSnapshot();
+      var cancelled = false;
+      var inflight = null;
+
+      function emit(patch) {
+        state = Object.assign({}, state, patch);
+        for (var index = 0; index < listeners.length; index += 1) listeners[index](state);
+      }
+
+      function record(entry, verdict) {
+        if (verdict.kind === "success") {
+          emit({
+            completed: state.completed + 1,
+            succeeded: state.succeeded + 1,
+            currentSessionId: ""
+          });
+          return;
+        }
+        emit({
+          completed: state.completed + 1,
+          failed: state.failed + 1,
+          failures: state.failures.concat([{ sessionId: entry.sessionId, kind: verdict.kind }]),
+          currentSessionId: ""
+        });
+      }
+
+      function step(queue, index) {
+        if (cancelled || index >= queue.length) return Promise.resolve();
+        var entry = queue[index];
+        emit({ currentSessionId: entry.sessionId });
+        return Promise.resolve()
+          .then(function () {
+            return execute(entry.sessionId);
+          })
+          .then(
+            function (outcome) {
+              record(entry, interpretOutcome(outcome));
+            },
+            function () {
+              record(entry, { kind: "error" });
+            }
+          )
+          .then(function () {
+            return cancelled ? undefined : step(queue, index + 1);
+          });
+      }
+
+      return {
+        /** Observe progress; returns the unsubscribe function. */
+        subscribe: function (listener) {
+          listeners.push(listener);
+          return function () {
+            var at = listeners.indexOf(listener);
+            if (at !== -1) listeners.splice(at, 1);
+          };
+        },
+        /** Current immutable progress snapshot. */
+        getSnapshot: function () {
+          return state;
+        },
+        /** Whether a run is in flight right now. */
+        isRunning: function () {
+          return inflight !== null;
+        },
+        /** Number of sessions a `start` with these rows would actually run. */
+        countRunnable: function (rows) {
+          var seen = {};
+          var count = 0;
+          for (var index = 0; index < (rows || []).length; index += 1) {
+            var row = rows[index];
+            var id = row !== null && row !== undefined ? row.sessionId : undefined;
+            if (typeof id !== "string" || id.length === 0 || seen[id] === true) continue;
+            seen[id] = true;
+            count += 1;
+          }
+          return count;
+        },
+        /**
+         * Run one batch. Joins an in-flight run instead of starting a second.
+         * @param rows - `session.list` rows (extra fields are ignored).
+         * @returns a promise resolving to the final snapshot.
+         */
+        start: function (rows) {
+          if (inflight !== null) return inflight;
+          var queue = [];
+          var seen = {};
+          for (var index = 0; index < (rows || []).length; index += 1) {
+            var row = rows[index];
+            var id = row !== null && row !== undefined ? row.sessionId : undefined;
+            if (typeof id !== "string" || id.length === 0 || seen[id] === true) continue;
+            seen[id] = true;
+            queue.push({ sessionId: id, title: titleOfSessionRow(row) });
+          }
+          if (queue.length === 0) return Promise.resolve(state);
+          cancelled = false;
+          emit({
+            status: "running",
+            total: queue.length,
+            completed: 0,
+            succeeded: 0,
+            failed: 0,
+            currentSessionId: queue[0].sessionId,
+            failures: [],
+            cancelRequested: false
+          });
+          inflight = step(queue, 0).then(
+            function () {
+              inflight = null;
+              emit({
+                status: cancelled ? "cancelled" : "done",
+                currentSessionId: "",
+                cancelRequested: false
+              });
+              return state;
+            },
+            function (error) {
+              inflight = null;
+              emit({ status: "done", currentSessionId: "", cancelRequested: false });
+              throw error;
+            }
+          );
+          return inflight;
+        },
+        /**
+         * Stop after the session currently in flight: the Remote command call
+         * carries no cancellation signal, so the running session is allowed to
+         * finish (and keep its new title) instead of being abandoned mid-write.
+         */
+        cancel: function () {
+          if (inflight === null || cancelled) return;
+          cancelled = true;
+          emit({ cancelRequested: true });
+        }
+      };
     }
 
     /** Icon-only action button, matching the shipped header-action affordance. */
@@ -458,7 +741,17 @@ window.__ModuleLoader__.load({
     }
 
     /** Client services this plugin needs. */
-    var inject = ["slots", "remote", "remote.commands", "remote.llm", "locale", "settingsScope"];
+    var inject = [
+      "slots",
+      "remote",
+      "remote.commands",
+      "remote.llm",
+      // Stored-Session list for the batch optimizer (`session.list`); declaring
+      // the namespace is what makes the Remote granted at all.
+      "remote.session",
+      "locale",
+      "settingsScope"
+    ];
 
     /**
      * Client plugin body: register dictionaries and the header action.
@@ -475,6 +768,35 @@ window.__ModuleLoader__.load({
       var controller = createRegenerationController(function (sessionId, line) {
         return ctx.remote.commands.execute(sessionId, line, []);
       });
+
+      // Batch runner, created in plugin scope so a run survives the settings
+      // page being closed. It drives the SAME `/retitle` command route as the
+      // header button; the host resumes each stored Session on demand.
+      var batch = createBatchController(function (sessionId) {
+        return ctx.remote.commands.execute(sessionId, RETITLE_LINE, []);
+      });
+      ctx.effect(
+        function () {
+          return function () {
+            // Plugin unload must not leave a run driving model calls.
+            batch.cancel();
+          };
+        },
+        "smart-session-title: batch runner"
+      );
+
+      /**
+       * Read every visible stored Session through the public `session.list`
+       * Remote. The host serves this WITHOUT resuming an Agent, so listing is
+       * free; `ok:false` covers a host that did not grant the namespace.
+       */
+      function listSessions() {
+        var sessionRemote = ctx.remote === undefined || ctx.remote === null ? undefined : ctx.remote.session;
+        if (sessionRemote === undefined || sessionRemote === null || typeof sessionRemote.list !== "function") {
+          return Promise.resolve({ ok: false });
+        }
+        return Promise.resolve(sessionRemote.list({}));
+      }
 
       // The settings page binds this plugin's own namespace scope through the
       // settings domain's base service — the documented route for a feature that
@@ -503,7 +825,11 @@ window.__ModuleLoader__.load({
                 describe: ctx.settingsScope.describe(),
                 // Host remote — used to list registered LLM providers for the
                 // provider dropdown.
-                remote: ctx.remote
+                remote: ctx.remote,
+                // Batch optimizer: the plugin-scope runner (progress survives
+                // this page being closed) and the stored-Session reader.
+                batch: batch,
+                listSessions: listSessions
               };
             }
           },
@@ -1015,13 +1341,466 @@ window.__ModuleLoader__.load({
         )
       );
 
+      // Batch retitle of stored sessions — explicit selection, then a run that
+      // keeps going after this page is closed (the runner lives in plugin scope).
+      children.push(
+        react.createElement(BatchTitleOptimizer, {
+          key: "batch",
+          t: t,
+          batch: props.batch,
+          listSessions: props.listSessions,
+          disabled: !enabled || effectiveMode === "disabled"
+        })
+      );
+
       // Which build is loaded — the first thing a bug report needs.
       children.push(versionFooter(t));
 
       return react.createElement("div", {}, children);
     }
 
+    /**
+     * "Optimize past titles" block: pick stored sessions, then batch-retitle them.
+     *
+     * Reads the stored Session list through the public `session.list` Remote
+     * (which the host serves WITHOUT resuming any Agent), then hands the chosen
+     * rows to the shared batch runner. Progress comes from the runner, so
+     * unmounting this page leaves the run going and reopening it shows the live
+     * state again.
+     *
+     * @param props.t - the slot translator.
+     * @param props.batch - `createBatchController` instance from `apply`.
+     * @param props.listSessions - `() => Promise<{ok, value:{items}}>`.
+     * @param props.disabled - true when AI titles are switched off.
+     */
+    function BatchTitleOptimizer(props) {
+      var t = translatorOf(props);
+      var batch = props.batch;
+      var listSessions = props.listSessions;
+      var aiDisabled = props.disabled === true;
+
+      // `undefined` = not loaded yet, `null` = load failed, array = loaded rows.
+      var rowsPair = react.useState(undefined);
+      var rows = rowsPair[0];
+      var setRows = rowsPair[1];
+      var loadingPair = react.useState(false);
+      var loading = loadingPair[0];
+      var setLoading = loadingPair[1];
+      var selectedPair = react.useState({});
+      var selected = selectedPair[0];
+      var setSelected = selectedPair[1];
+      var cwdPair = react.useState("");
+      var cwdFilter = cwdPair[0];
+      var setCwdFilter = cwdPair[1];
+      var snapPair = react.useState(function () {
+        return batch !== undefined ? batch.getSnapshot() : idleBatchSnapshot();
+      });
+      var snap = snapPair[0];
+      var setSnap = snapPair[1];
+
+      var mounted = react.useRef(true);
+      var lastStatus = react.useRef(snap.status);
+      react.useEffect(function () {
+        return function () {
+          mounted.current = false;
+        };
+      }, []);
+
+      react.useEffect(
+        function () {
+          if (batch === undefined) return undefined;
+          setSnap(batch.getSnapshot());
+          return batch.subscribe(function (next) {
+            if (mounted.current) setSnap(next);
+          });
+        },
+        [batch]
+      );
+
+      function load() {
+        if (listSessions === undefined) return;
+        setLoading(true);
+        Promise.resolve()
+          .then(function () {
+            return listSessions();
+          })
+          .then(
+            function (result) {
+              if (!mounted.current) return;
+              setLoading(false);
+              if (result === undefined || result === null || result.ok !== true) {
+                setRows(null);
+                return;
+              }
+              var items = result.value !== undefined && result.value !== null && Array.isArray(result.value.items)
+                ? result.value.items
+                : [];
+              setRows(selectBatchCandidates(items));
+            },
+            function () {
+              if (!mounted.current) return;
+              setLoading(false);
+              setRows(null);
+            }
+          );
+      }
+
+      // A finished run rewrote titles: reload the rows so the list shows them.
+      // Guarded on `rows !== undefined` so merely opening the page never starts
+      // an unrequested list load, and on the status change so one run refreshes
+      // exactly once (a short run can go idle → done without an observed middle).
+      react.useEffect(function () {
+        var previous = lastStatus.current;
+        lastStatus.current = snap.status;
+        var terminal = snap.status === "done" || snap.status === "cancelled";
+        if (terminal && previous !== snap.status && rows !== undefined) load();
+      });
+
+      if (batch === undefined || listSessions === undefined) {
+        return react.createElement(
+          "fieldset",
+          { style: { border: "none", padding: 0, margin: "16px 0 0 0" } },
+          react.createElement(
+            "legend",
+            { style: { fontWeight: 500, marginBottom: 4, padding: 0, fontSize: 13 } },
+            t("batch.legend")
+          ),
+          react.createElement("p", { style: HINT_STYLE }, t("batch.unavailable"))
+        );
+      }
+
+      var fieldStyle = {
+        boxSizing: "border-box",
+        padding: "4px 8px",
+        borderRadius: 6,
+        border: "1px solid var(--dsw-alias-border-l4)",
+        background: "var(--dsw-alias-bg-base)",
+        color: "inherit",
+        fontSize: 13
+      };
+      var buttonStyle = {
+        padding: "4px 10px",
+        borderRadius: 6,
+        border: "1px solid var(--dsw-alias-border-l4)",
+        background: "var(--dsw-alias-bg-base)",
+        color: "inherit",
+        fontSize: 13,
+        cursor: "pointer"
+      };
+      var running = snap.status === "running";
+      var list = Array.isArray(rows) ? rows : [];
+      var cwds = [];
+      for (var index = 0; index < list.length; index += 1) {
+        var cwd = typeof list[index].cwd === "string" ? list[index].cwd : "";
+        if (cwd !== "" && cwds.indexOf(cwd) === -1) cwds.push(cwd);
+      }
+      var visible = cwdFilter === "" ? list : list.filter(function (row) { return row.cwd === cwdFilter; });
+      var ROW_LIMIT = 300;
+      var truncated = visible.length > ROW_LIMIT;
+      if (truncated) visible = visible.slice(0, ROW_LIMIT);
+      var selectedRows = list.filter(function (row) { return selected[row.sessionId] === true; });
+      var canStart = !running && !aiDisabled && selectedRows.length > 0;
+
+      var children = [];
+
+      children.push(
+        react.createElement(
+          "legend",
+          { key: "legend", style: { fontWeight: 500, marginBottom: 4, padding: 0, fontSize: 13 } },
+          t("batch.legend")
+        )
+      );
+      children.push(
+        react.createElement("p", { key: "intro", style: Object.assign({ marginTop: 0, marginBottom: 4 }, HINT_STYLE) }, t("batch.intro"))
+      );
+      children.push(
+        react.createElement("p", { key: "cost", style: Object.assign({ marginTop: 0, marginBottom: 8 }, HINT_STYLE) }, t("batch.costHint"))
+      );
+
+      if (aiDisabled) {
+        children.push(
+          react.createElement("p", { key: "off", style: Object.assign({ marginTop: 0, marginBottom: 8 }, HINT_STYLE) }, t("batch.disabled"))
+        );
+      }
+
+      children.push(
+        react.createElement(
+          "div",
+          { key: "load", style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 8 } },
+          react.createElement(
+            "button",
+            {
+              type: "button",
+              style: buttonStyle,
+              disabled: loading || running,
+              onClick: load
+            },
+            loading ? t("batch.loading") : rows === undefined ? t("batch.load") : t("batch.reload")
+          ),
+          list.length > 0
+            ? react.createElement(
+                "span",
+                { style: HINT_STYLE },
+                t("batch.count") + ": " + String(list.length)
+              )
+            : null
+        )
+      );
+
+      if (rows === null) {
+        children.push(
+          react.createElement("p", { key: "load-error", role: "alert", style: HINT_STYLE }, t("batch.loadFailed"))
+        );
+      } else if (Array.isArray(rows) && list.length === 0) {
+        children.push(react.createElement("p", { key: "empty", style: HINT_STYLE }, t("batch.empty")));
+      }
+
+      if (list.length > 0) {
+        children.push(
+          react.createElement(
+            "div",
+            { key: "toolbar", style: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 } },
+            cwds.length > 1
+              ? react.createElement(
+                  "select",
+                  {
+                    value: cwdFilter,
+                    disabled: running,
+                    style: Object.assign({ maxWidth: 260 }, fieldStyle, { width: "auto" }),
+                    onChange: function (event) {
+                      setCwdFilter(event.target.value);
+                    }
+                  },
+                  [react.createElement("option", { key: "__all", value: "" }, t("batch.allCwd"))].concat(
+                    cwds.map(function (value) {
+                      return react.createElement("option", { key: value, value: value }, value);
+                    })
+                  )
+                )
+              : null,
+            react.createElement(
+              "button",
+              {
+                type: "button",
+                style: buttonStyle,
+                disabled: running,
+                onClick: function () {
+                  var next = Object.assign({}, selected);
+                  for (var i = 0; i < visible.length; i += 1) next[visible[i].sessionId] = true;
+                  setSelected(next);
+                }
+              },
+              t("batch.selectAll")
+            ),
+            react.createElement(
+              "button",
+              {
+                type: "button",
+                style: buttonStyle,
+                disabled: running,
+                onClick: function () {
+                  setSelected({});
+                }
+              },
+              t("batch.clear")
+            ),
+            react.createElement(
+              "span",
+              { style: HINT_STYLE },
+              t("batch.selectedCount") + ": " + String(selectedRows.length)
+            )
+          )
+        );
+
+        children.push(
+          react.createElement(
+            "div",
+            {
+              key: "rows",
+              style: {
+                maxHeight: 220,
+                overflowY: "auto",
+                border: "1px solid var(--dsw-alias-border-l4)",
+                borderRadius: 6,
+                padding: "2px 6px",
+                marginBottom: 8
+              }
+            },
+            visible.map(function (row) {
+              var title = titleOfSessionRow(row);
+              var meta = [];
+              if (typeof row.cwd === "string" && row.cwd !== "") meta.push(row.cwd);
+              if (typeof row.updatedAt === "number") meta.push(new Date(row.updatedAt).toLocaleString());
+              if (row.running === true) meta.push(t("batch.runningBadge"));
+              return react.createElement(
+                "label",
+                {
+                  key: row.sessionId,
+                  style: {
+                    display: "flex",
+                    alignItems: "baseline",
+                    gap: 6,
+                    padding: "3px 0",
+                    fontSize: 13,
+                    cursor: running ? "default" : "pointer"
+                  }
+                },
+                react.createElement("input", {
+                  type: "checkbox",
+                  checked: selected[row.sessionId] === true,
+                  disabled: running,
+                  onChange: function () {
+                    var next = Object.assign({}, selected);
+                    if (next[row.sessionId] === true) delete next[row.sessionId];
+                    else next[row.sessionId] = true;
+                    setSelected(next);
+                  }
+                }),
+                react.createElement(
+                  "span",
+                  { style: { display: "flex", flexDirection: "column", minWidth: 0 } },
+                  react.createElement(
+                    "span",
+                    { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
+                    title === "" ? t("batch.noTitle") : title
+                  ),
+                  react.createElement("span", { style: HINT_STYLE }, meta.join(" · "))
+                )
+              );
+            })
+          )
+        );
+
+        if (truncated) {
+          children.push(react.createElement("p", { key: "truncated", style: HINT_STYLE }, t("batch.truncated")));
+        }
+
+        children.push(
+          react.createElement(
+            "div",
+            { key: "actions", style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 8 } },
+            react.createElement(
+              "button",
+              {
+                type: "button",
+                style: Object.assign({}, buttonStyle, {
+                  opacity: canStart ? 1 : 0.45,
+                  cursor: canStart ? "pointer" : "default"
+                }),
+                disabled: !canStart,
+                onClick: function () {
+                  batch.start(selectedRows);
+                }
+              },
+              t("batch.start") + " (" + String(selectedRows.length) + ")"
+            ),
+            running
+              ? react.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    style: buttonStyle,
+                    disabled: snap.cancelRequested === true,
+                    onClick: function () {
+                      batch.cancel();
+                    }
+                  },
+                  t("batch.cancel")
+                )
+              : null
+          )
+        );
+      }
+
+      if (snap.status !== "idle") {
+        var percent = snap.total === 0 ? 0 : Math.round((snap.completed / snap.total) * 100);
+        var statusLabel = snap.status === "running"
+          ? t("batch.running")
+          : snap.status === "cancelled"
+            ? t("batch.cancelled")
+            : t("batch.done");
+        children.push(
+          react.createElement(
+            "div",
+            { key: "progress" },
+            react.createElement(
+              "div",
+              { style: { display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12 } },
+              react.createElement("span", {}, t("batch.status") + ": " + statusLabel),
+              react.createElement(
+                "span",
+                { style: { color: "var(--dsw-alias-label-tertiary)" } },
+                t("batch.completedCount") + " " + String(snap.completed) + " / " + String(snap.total) +
+                  " · " + t("batch.okCount") + " " + String(snap.succeeded) +
+                  " · " + t("batch.failedCount") + " " + String(snap.failed)
+              )
+            ),
+            react.createElement(
+              "div",
+              {
+                role: "progressbar",
+                "aria-valuemin": 0,
+                "aria-valuemax": snap.total,
+                "aria-valuenow": snap.completed,
+                style: {
+                  height: 6,
+                  borderRadius: 999,
+                  margin: "4px 0",
+                  background: "var(--dsw-alias-border-l4)",
+                  overflow: "hidden"
+                }
+              },
+              react.createElement("div", {
+                style: {
+                  height: "100%",
+                  width: String(percent) + "%",
+                  borderRadius: 999,
+                  background: "var(--dsw-alias-label-tertiary)"
+                }
+              })
+            ),
+            snap.cancelRequested === true && running
+              ? react.createElement("p", { style: HINT_STYLE }, t("batch.cancelling"))
+              : null,
+            running && snap.currentSessionId !== ""
+              ? react.createElement(
+                  "p",
+                  { style: Object.assign({ marginTop: 0, marginBottom: 4 }, HINT_STYLE) },
+                  t("batch.current") + ": " + snap.currentSessionId
+                )
+              : null,
+            snap.failures.length > 0
+              ? react.createElement(
+                  "div",
+                  { style: { marginTop: 4 } },
+                  react.createElement("p", { style: Object.assign({ marginTop: 0, marginBottom: 2 }, HINT_STYLE) }, t("batch.failures")),
+                  snap.failures.map(function (failure) {
+                    return react.createElement(
+                      "p",
+                      { key: failure.sessionId, style: HINT_STYLE },
+                      failure.sessionId + " — " +
+                        (failure.kind === "unavailable" ? t("batch.kindUnavailable") : t("batch.kindError"))
+                    );
+                  })
+                )
+              : null
+          )
+        );
+      }
+
+      return react.createElement(
+        "fieldset",
+        { style: { border: "none", padding: 0, margin: "16px 0 0 0" } },
+        children
+      );
+    }
+
   exports.SettingsSection = SettingsSection;
+  exports.BatchTitleOptimizer = BatchTitleOptimizer;
+  exports.createBatchController = createBatchController;
+  exports.selectBatchCandidates = selectBatchCandidates;
+  exports.isBatchCandidate = isBatchCandidate;
+  exports.titleOfSessionRow = titleOfSessionRow;
   return module.exports;
   }
 });

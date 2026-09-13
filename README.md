@@ -3,7 +3,7 @@
 English | [简体中文](README.zh-CN.md)
 
 Smarter automatic session titles for **DeepSeek Harness (DSH)**.
-**0.2.0-rc.3 — release candidate**, intended for the npm `next` tag.
+**0.3.0-rc.1 — release candidate**, intended for the npm `next` tag.
 
 ## What it does
 
@@ -105,6 +105,25 @@ All three route fields are saved atomically. IDs come from DSH's Models page;
 this plugin does not manage credentials or provide a model browser.
 **Advanced** exposes timeout and attempts. Empty numeric fields inherit the bundle
 configuration; deployment-level compression options are in `cordis.patch.yml`.
+
+### Optimize past titles
+
+The same page lists your **stored sessions** with the title each one currently
+has, so you can batch-regenerate titles written before this plugin was installed.
+Pick the rows (or select all within one project) and start the run.
+
+- One `/retitle` per session, **strictly sequential**: a run of N sessions costs
+  N model calls and never runs two generations at once.
+- Selected titles are rewritten, **including titles you renamed by hand** — the
+  explicit `/retitle` path is DSH's documented way to unpin a manual title.
+- Sessions without an eligible user message and subagent sessions are skipped
+  (the host has nothing to generate from, or refuses to resume them).
+- Progress (completed / succeeded / failed) is owned by a plugin-scope runner,
+  not by the page: **closing Settings does not stop a run**, and reopening the
+  page shows the live progress again. Only reloading the whole DSH window
+  interrupts a run, and every session that already finished keeps its new title.
+  Cancel takes effect after the session currently in flight, because the Remote
+  command call carries no cancellation signal.
 
 ## Model modes
 
