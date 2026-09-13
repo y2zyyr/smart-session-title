@@ -203,9 +203,10 @@ Private development reports, session records, and local test fixtures are exclud
 - **REASONING_CONTROL_UNAVAILABLE_CONFIRMED:** there is no uniform cross-adapter
   reasoning-disable control. The plugin inherits adapter defaults instead of forcing `off`.
 - Some reasoning models can exhaust the 96-token output budget; fallback remains intact.
-- Provider/model selection uses simple ID fields. Settings and header copy
-  follow the DSH UI language (zh/en dictionaries; other languages fall back
-  to English).
+- Configured mode picks the provider and model from those already registered
+  in DSH, and falls back to manual IDs when a provider lists no models. Settings
+  and header copy follow the DSH UI language (zh/en dictionaries; other
+  languages fall back to English).
 - No task-drift retitling, shortcuts, cloud sync, telemetry, custom database, or
   advanced model-management UI.
 

@@ -149,7 +149,7 @@ Phase 3 已在隔离真实 DSH runtime 挂载原装 Desktop exporter，确认成
 
 - **REASONING_CONTROL_UNAVAILABLE_CONFIRMED**：没有跨 adapter 的统一 reasoning-disabled 控制。插件不硬塞 `off`，沿用 adapter 默认行为。
 - 某些 reasoning 模型可能用尽 96-token 标题输出预算，正确保留 fallback。
-- Provider/model 使用简单 ID 输入框；设置页与标题按钮文案跟随 DSH 界面语言（中英双语词典，其他语言回退英文）。
+- Configured 模式的 provider/model 从 DSH 已注册的模型中选择，取不到列表时回退手动输入；设置页与标题按钮文案跟随 DSH 界面语言（中英双语词典，其他语言回退英文）。
 - 不做任务漂移自动重命名、快捷键、云同步、遥测、独立数据库或复杂模型管理。
 
 ## 许可证
