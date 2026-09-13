@@ -50,7 +50,7 @@ window.__ModuleLoader__.load({
      * The two are kept in sync deliberately: `validation/verify-i18n.mjs`
      * fails when this string and package.json's `version` drift apart.
      */
-    var PLUGIN_VERSION = "0.2.0-rc.2";
+    var PLUGIN_VERSION = "0.2.0-rc.3";
 
     /** Simplified Chinese dictionary (the key-set source of truth). */
     var zh = {
@@ -61,7 +61,7 @@ window.__ModuleLoader__.load({
       "action.unavailable": "重新生成标题：命令不可用",
       "action.failed": "重新生成标题失败",
       // Settings nav label -----------------------------------------
-      "nav": "Smart Session Title",
+      "nav": "智能会话标题",
       // Settings page ----------------------------------------------
       "settings.unavailable": "当前浏览器中无法使用此设置。",
       "settings.loading": "正在加载…",

@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-DeepSeek Harness 会话智能标题插件。**0.2.0-rc.2 — 发布候选版本**，npm 标签为 `next`。
+DeepSeek Harness 会话智能标题插件。**0.2.0-rc.3 — 发布候选版本**，npm 标签为 `next`。
 
 ## 功能
 
@@ -57,7 +57,7 @@ Web 端需要 DSH 原生 slots、locale、settingsScope 和 Remote commands。
 
 ## 设置
 
-打开 **设置 → Smart Session Title**。配置通过 DSH 官方 `settingsScope` / Remote Settings 写入
+打开 **设置 → 智能会话标题**。配置通过 DSH 官方 `settingsScope` / Remote Settings 写入
 **`$DSH_HOME/settings.yaml` 的 `smart-session-title` namespace**；由 DSH 负责原子写入、revision 和文件 watcher。
 没有独立 JSON、sidecar、额外 watcher 或 HTTP 服务。下一次生成实时使用新设置，当前进行中的请求保持开始时的配置。
 

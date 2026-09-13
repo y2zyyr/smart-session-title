@@ -1,6 +1,6 @@
 {
   "name": "smart-session-title",
-  "version": "0.2.0-rc.2",
+  "version": "0.2.0-rc.3",
   "description": "Replacement session-title provider for DeepSeek Harness: compresses oversized first prompts instead of failing, and gates weak prompts.",
   "license": "MIT",
   "type": "module",
