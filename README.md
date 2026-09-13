@@ -3,7 +3,7 @@
 English | [简体中文](README.zh-CN.md)
 
 Smarter automatic session titles for **DeepSeek Harness (DSH)**.
-**0.3.0-rc.6 — release candidate**, intended for the npm `next` tag.
+**0.4.0-rc.1 — release candidate**, intended for the npm `next` tag.
 
 ## What it does
 
@@ -101,6 +101,9 @@ the exact build.
 | `model` | Unset | Model ID belonging to that provider |
 | `timeoutMs` | 15000 | Per-attempt timeout; UI range 1000–120000 ms |
 | `maxAttempts` | 2 | Total attempts; range 1–3 |
+| `maxTitleCharacters` | Unset (inherits 80 bytes) | Title **character cap** (Unicode code points); UI range 8–120 |
+| `titleDatePosition` | Unset (no date) | `prefix` / `suffix`: put the session's creation date before or after the title |
+| `titleDateFormat` | `ymd` | `ymd` (`2026-09-13`) or `md` (`09-13`); unused while no position is chosen |
 
 ¹ For older deployments only, an explicit provider/model pin in the bundle row
 remains effective until the user chooses a mode. The shipped bundle has no pin.
@@ -115,6 +118,29 @@ the change is not in effect yet — until then titles keep following
 **Current session model**, i.e. the model each session logged.
 **Advanced** exposes timeout and attempts. Empty numeric fields inherit the bundle
 configuration; deployment-level compression options are in `cordis.patch.yml`.
+
+### Title shape (character cap and date)
+
+The **Title shape** block on the settings page needs no expanding:
+
+- **Maximum title characters**: empty inherits the deployment config, i.e. DSH's
+  `maxTitleBytes: 80` (about 26 CJK characters or 80 Latin characters). A value
+  between 8 and 120 applies a code-point cap *on top of* the byte cap, and the
+  cut prefers a separator so a word is not sliced in half.
+- **Date position / Date format**: the date is the **session's creation time**
+  (`session.header.createdAt`, local time), not the moment of generation —
+  regenerating a title, or batch-retitling an old session, keeps that session's
+  own day. Choose a prefix (`2026-09-13 Title`), a suffix
+  (`Title · 2026-09-13`), or none.
+- The affix is **reserved out of the 80-byte budget** before the body is
+  shortened: DSH truncates an over-long title from the *tail*, so an unreserved
+  suffix would be the first thing lost. A character cap therefore leaves room
+  for the date automatically.
+- When no usable date exists (a session header without `createdAt`, or an
+  unresolvable time zone) the plugin adds no affix instead of a broken title.
+- The date applies only to **titles this plugin generates**: the fallback title
+  used while AI titles are off, and titles you rename by hand, are written by
+  DSH Core and never carry it.
 
 ### Optimize past titles
 

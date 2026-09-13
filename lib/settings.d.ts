@@ -12,6 +12,7 @@
  * only provider and model IDENTIFIERS; credentials stay with DSH.
  */
 import type { TitleConfig } from "./config.js";
+import type { AffixDateFormat, AffixPosition } from "./title-affix.js";
 /** Settings namespace; also the top-level key in `settings.yaml`. */
 export declare const SETTINGS_NAMESPACE = "smart-session-title";
 /** How the title model route is chosen. */
@@ -39,6 +40,12 @@ export interface TitleSettings {
     readonly timeoutMs: number | undefined;
     /** Attempt budget override, or undefined to inherit the row config. */
     readonly maxAttempts: number | undefined;
+    /** Code-point cap on the generated title, or undefined for the byte default. */
+    readonly maxTitleCharacters: number | undefined;
+    /** Where the creation date goes, or undefined for "no affix". */
+    readonly titleDatePosition: AffixPosition | undefined;
+    /** Date shape; undefined means `ymd` wherever a position is set. */
+    readonly titleDateFormat: AffixDateFormat | undefined;
 }
 /** Values the schema/bundle layer supplies when the user has chosen nothing. */
 export declare const SETTINGS_BASE: {
@@ -52,6 +59,8 @@ export declare const SETTINGS_LIMITS: Readonly<{
     timeoutMsMax: 120000;
     maxAttemptsMin: 1;
     maxAttemptsMax: 3;
+    maxTitleCharactersMin: 8;
+    maxTitleCharactersMax: 120;
 }>;
 /**
  * Validate one resolved settings value.
@@ -81,5 +90,10 @@ export declare function isAiTitleDisabled(settings: TitleSettings): boolean;
  * particular the route — keeps coming from the row config. Route selection is
  * `resolveTitleRoute`'s single responsibility, so it is deliberately NOT
  * touched here.
+ *
+ * The title-shape fields (`maxTitleCharacters`, `titleDatePosition`,
+ * `titleDateFormat`) are deliberately NOT merged: they have no composition
+ * equivalent, and the provider reads them from the settings half of the policy
+ * so an absent value keeps meaning "no cap" / "no affix".
  */
 export declare function applySettingsToTitleConfig(base: TitleConfig, settings: TitleSettings): TitleConfig;

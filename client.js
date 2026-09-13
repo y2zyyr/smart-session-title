@@ -50,7 +50,7 @@ window.__ModuleLoader__.load({
      * The two are kept in sync deliberately: `validation/verify-i18n.mjs`
      * fails when this string and package.json's `version` drift apart.
      */
-    var PLUGIN_VERSION = "0.3.0-rc.6";
+    var PLUGIN_VERSION = "0.4.0-rc.1";
 
     /**
      * Where the batch block remembers its automatic-fallback checkbox. It is a
@@ -121,6 +121,17 @@ window.__ModuleLoader__.load({
       "settings.maxAttempts": "最大尝试次数",
       "settings.advancedHint": "留空表示继承部署的 composition 配置。改动作用于下一次标题生成；凭据仍由 DSH 管理。",
       "settings.version": "版本",
+      // Title shape: length cap + optional date affix -----------------
+      "settings.shapeLegend": "标题格式",
+      "settings.maxCharacters": "标题最大字数",
+      "settings.dateAffix": "日期位置",
+      "settings.dateAffixOff": "不添加",
+      "settings.dateAffixPrefix": "前缀",
+      "settings.dateAffixSuffix": "后缀",
+      "settings.dateFormat": "日期格式",
+      "settings.dateFormatYmd": "2026-09-13",
+      "settings.dateFormatMd": "09-13",
+      "settings.shapeHint": "字数上限留空表示继承部署配置（80 字节，约 26 个汉字或 80 个西文字符）。日期取会话创建时间（本地时区），重新生成标题不会改变它；选择后缀时，字数会先为日期留出空间，确保日期不被截掉。",
       // Batch: optimize past titles ---------------------------------
       "batch.legend": "批量优化历史标题",
       "batch.intro": "选中要重新生成标题的历史会话。每个会话调用一次模型；被选中的标题会被重写，包括你手动改过的标题。",
@@ -207,6 +218,17 @@ window.__ModuleLoader__.load({
       "settings.maxAttempts": "Max attempts",
       "settings.advancedHint": "An empty field inherits the deployment's composition config. Changes apply to the next title generation; credentials stay managed by DSH.",
       "settings.version": "Version",
+      // Title shape: length cap + optional date affix -----------------
+      "settings.shapeLegend": "Title shape",
+      "settings.maxCharacters": "Maximum title characters",
+      "settings.dateAffix": "Date position",
+      "settings.dateAffixOff": "None",
+      "settings.dateAffixPrefix": "Prefix",
+      "settings.dateAffixSuffix": "Suffix",
+      "settings.dateFormat": "Date format",
+      "settings.dateFormatYmd": "2026-09-13",
+      "settings.dateFormatMd": "09-13",
+      "settings.shapeHint": "An empty character limit inherits the deployment config (80 bytes: about 26 CJK characters or 80 Latin characters). The date is the session's creation time in local time and does not move when a title is regenerated; a suffix date reserves its own space inside the limit so it is never cut off.",
       // Batch: optimize past titles ---------------------------------
       "batch.legend": "Optimize past titles",
       "batch.intro": "Pick the past sessions to retitle. Each one costs one model call; the selected titles are rewritten, including titles you renamed by hand.",
@@ -1318,7 +1340,7 @@ window.__ModuleLoader__.load({
       };
 
       function writeField(field, raw) {
-        if (field === "timeoutMs" || field === "maxAttempts") {
+        if (field === "timeoutMs" || field === "maxAttempts" || field === "maxTitleCharacters") {
           // Empty means "inherit the row config", which is an unset, not a 0.
           if (raw === "") save(function () { return scope.unset(field); });
           else {
@@ -1603,6 +1625,80 @@ window.__ModuleLoader__.load({
           )
         );
       }
+
+      // Title shape: the code-point cap and the optional date affix. Both are
+      // read by the host half on the next generation, so there is nothing to
+      // save explicitly — the same immediate-write contract as the fields above.
+      // The date itself comes from the session's creation time, which is why
+      // this block offers no date picker: there is nothing for the user to pick.
+      children.push(
+        react.createElement(
+          "fieldset",
+          { key: "shape", style: { border: "none", padding: 0, margin: "0 0 12px 0" } },
+          react.createElement(
+            "legend",
+            { style: { fontWeight: 500, marginBottom: 4, padding: 0, fontSize: 13 } },
+            t("settings.shapeLegend")
+          ),
+          react.createElement(
+            "div",
+            { style: { marginBottom: 6 } },
+            react.createElement("label", { style: labelStyle }, t("settings.maxCharacters")),
+            react.createElement("input", {
+              type: "number",
+              min: 8,
+              max: 120,
+              value: typeof user.maxTitleCharacters === "number" ? user.maxTitleCharacters : "",
+              disabled: busy,
+              placeholder: "26",
+              style: Object.assign({ width: 80 }, fieldStyle),
+              onChange: function (event) {
+                writeField("maxTitleCharacters", event.target.value);
+              }
+            })
+          ),
+          react.createElement(
+            "div",
+            { style: { marginBottom: 6 } },
+            react.createElement("label", { style: labelStyle }, t("settings.dateAffix")),
+            react.createElement(
+              "select",
+              {
+                value: typeof user.titleDatePosition === "string" ? user.titleDatePosition : "",
+                disabled: busy,
+                style: Object.assign({ width: 140 }, fieldStyle),
+                onChange: function (event) {
+                  // The empty option is "no affix", which is an unset — never a
+                  // sentinel string the host would have to know about.
+                  writeField("titleDatePosition", event.target.value);
+                }
+              },
+              react.createElement("option", { value: "" }, t("settings.dateAffixOff")),
+              react.createElement("option", { value: "prefix" }, t("settings.dateAffixPrefix")),
+              react.createElement("option", { value: "suffix" }, t("settings.dateAffixSuffix"))
+            )
+          ),
+          react.createElement(
+            "div",
+            { style: { marginBottom: 6 } },
+            react.createElement("label", { style: labelStyle }, t("settings.dateFormat")),
+            react.createElement(
+              "select",
+              {
+                value: typeof user.titleDateFormat === "string" ? user.titleDateFormat : "ymd",
+                disabled: busy,
+                style: Object.assign({ width: 140 }, fieldStyle),
+                onChange: function (event) {
+                  writeField("titleDateFormat", event.target.value);
+                }
+              },
+              react.createElement("option", { value: "ymd" }, t("settings.dateFormatYmd")),
+              react.createElement("option", { value: "md" }, t("settings.dateFormatMd"))
+            )
+          ),
+          react.createElement("p", { style: hintStyle }, t("settings.shapeHint"))
+        )
+      );
 
       children.push(
         react.createElement(

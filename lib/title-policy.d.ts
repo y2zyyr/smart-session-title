@@ -30,6 +30,14 @@ export declare function truncateTitleUtf8(input: string, maxBytes: number): stri
  * leaves enough of the title intact.
  */
 export declare function truncateSemantically(input: string, maxBytes: number): string;
+/**
+ * Shorten a title to a code-point budget, preferring a nearby separator.
+ *
+ * The byte cap is the service's hard limit; this one is what a human means by
+ * "字数" (26 CJK characters and 80 Latin characters are both 80 bytes). It is
+ * applied AFTER the byte cap, so a title never exceeds either limit.
+ */
+export declare function truncateTitleCharacters(input: string, maxCharacters: number): string;
 export interface CodeBlockStripResult {
     readonly text: string;
     readonly omitted: number;
@@ -140,5 +148,7 @@ export type TitleValidation = {
  *
  * @param raw - the model's raw text output.
  * @param maxTitleBytes - the byte budget the caller will also enforce.
+ * @param maxTitleCharacters - optional code-point cap ("字数"), applied after
+ *   the byte cap so the title honours whichever limit is tighter.
  */
-export declare function validateGeneratedTitle(raw: string, maxTitleBytes: number): TitleValidation;
+export declare function validateGeneratedTitle(raw: string, maxTitleBytes: number, maxTitleCharacters?: number): TitleValidation;
