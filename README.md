@@ -3,7 +3,7 @@
 English | [简体中文](README.zh-CN.md)
 
 Smarter automatic session titles for **DeepSeek Harness (DSH)**.
-**0.3.0-rc.4 — release candidate**, intended for the npm `next` tag.
+**0.3.0-rc.5 — release candidate**, intended for the npm `next` tag.
 
 ## What it does
 
@@ -126,8 +126,12 @@ Pick the rows (or select all within one project) and start the run.
   not by the page: **closing Settings does not stop a run**, and reopening the
   page shows the live progress again. Only reloading the whole DSH window
   interrupts a run, and every session that already finished keeps its new title.
-  Cancel takes effect after the session currently in flight, because the Remote
-  command call carries no cancellation signal.
+  **Stop** is immediate: `commands/execute` accepts a trailing `AbortSignal`, so
+  the in-flight generation is cancelled rather than waited out, the queue does not
+  continue, and the interrupted session is counted as neither success nor failure.
+  Stop is reachable both in the settings page and from a small global progress
+  pill (`shell.overlay`), which is what makes a background run stoppable after the
+  settings page is closed.
 - Failures list the **host's own reason** (dead route, timeout, maxOutputTokens,
   no usable message) instead of a generic "failed", and **Retry failed**
   re-runs exactly those sessions with whatever route settings are in force now.

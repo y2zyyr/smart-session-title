@@ -50,7 +50,7 @@ window.__ModuleLoader__.load({
      * The two are kept in sync deliberately: `validation/verify-i18n.mjs`
      * fails when this string and package.json's `version` drift apart.
      */
-    var PLUGIN_VERSION = "0.3.0-rc.4";
+    var PLUGIN_VERSION = "0.3.0-rc.5";
 
     /**
      * Where the batch block remembers its automatic-fallback checkbox. It is a
@@ -149,8 +149,11 @@ window.__ModuleLoader__.load({
       "batch.clear": "清空",
       "batch.selectedCount": "已选",
       "batch.start": "开始优化",
-      "batch.cancel": "取消",
-      "batch.cancelling": "正在取消，当前会话完成后停止…",
+      "batch.cancel": "停止",
+      "overlay.running": "批量优化",
+      "overlay.stop": "停止",
+      "overlay.stopping": "停止中…",
+      "batch.cancelling": "正在停止：已中断当前会话的生成，队列不再继续…",
       "batch.status": "状态",
       "batch.running": "正在优化",
       "batch.done": "已完成",
@@ -232,8 +235,11 @@ window.__ModuleLoader__.load({
       "batch.clear": "Clear",
       "batch.selectedCount": "Selected",
       "batch.start": "Start",
-      "batch.cancel": "Cancel",
-      "batch.cancelling": "Cancelling; stops after the current session…",
+      "batch.cancel": "Stop",
+      "overlay.running": "Batch retitle",
+      "overlay.stop": "Stop",
+      "overlay.stopping": "Stopping…",
+      "batch.cancelling": "Stopping: the current session's generation was cancelled and the queue will not continue…",
       "batch.status": "Status",
       "batch.running": "Optimizing",
       "batch.done": "Finished",
@@ -460,7 +466,11 @@ window.__ModuleLoader__.load({
      * DSH window reload can interrupt a run — and each session that already
      * finished keeps the title it wrote.
      *
-     * @param execute - `(sessionId) => Promise<outcome>`: the `/retitle` route.
+     * @param execute - `(sessionId, signal) => Promise<outcome>`: the `/retitle`
+     *   route. `signal` is a real client-side cancellation: the Remote accepts a
+     *   trailing AbortSignal (the descriptor declares `cancellation`), and the
+     *   gateway forwards it as the host invocation's cancellation, which aborts
+     *   the in-flight generation. That is what makes Stop immediate.
      * @param hooks - optional `{ runFallback }`. `runFallback(failures, runPass)`
      *   is called ONCE after a run that had failures, when the user enabled the
      *   automatic fallback. It owns switching the title route (plugin scope holds
@@ -475,6 +485,9 @@ window.__ModuleLoader__.load({
       var inflight = null;
       var autoFallback = false;
       var fallbackAttempted = false;
+      // Aborts the ONE session currently generating, so Stop does not wait out
+      // its remaining attempts.
+      var currentAbort = null;
 
       function emit(patch) {
         state = Object.assign({}, state, patch);
@@ -506,19 +519,26 @@ window.__ModuleLoader__.load({
         if (cancelled || index >= queue.length) return Promise.resolve();
         var entry = queue[index];
         emit({ currentSessionId: entry.sessionId });
+        var abort = typeof AbortController === "function" ? new AbortController() : null;
+        currentAbort = abort;
         return Promise.resolve()
           .then(function () {
-            return execute(entry.sessionId);
+            return execute(entry.sessionId, abort === null ? undefined : abort.signal);
           })
           .then(
             function (outcome) {
+              // An interrupted session is neither a success nor a failure: the
+              // user stopped it, so it must not pollute the failure list.
+              if (abort !== null && abort.signal.aborted) return;
               record(entry, interpretOutcome(outcome));
             },
             function () {
+              if (abort !== null && abort.signal.aborted) return;
               record(entry, { kind: "error" });
             }
           )
           .then(function () {
+            currentAbort = null;
             return cancelled ? undefined : step(queue, index + 1);
           });
       }
@@ -653,15 +673,26 @@ window.__ModuleLoader__.load({
           return inflight;
         },
         /**
-         * Stop after the session currently in flight: the Remote command call
-         * carries no cancellation signal, so the running session is allowed to
-         * finish (and keep its new title) instead of being abandoned mid-write.
-         * A pending automatic fallback is dropped rather than started.
+         * Stop now.
+         *
+         * The in-flight `/retitle` call is aborted through the Remote's optional
+         * AbortSignal, so the host cancels that session's generation instead of
+         * finishing it; the queue then stops without recording the interrupted
+         * session as failed. A pending automatic fallback is dropped, never
+         * started. Anything already written by earlier sessions stays written.
          */
         cancel: function () {
           if (inflight === null || cancelled) return;
           cancelled = true;
           fallbackAttempted = true;
+          if (currentAbort !== null) {
+            try {
+              currentAbort.abort();
+            } catch (error) {
+              // An abort of an already-settled step is not an error worth losing
+              // the cancellation over.
+            }
+          }
           emit({ cancelRequested: true });
         }
       };
@@ -976,8 +1007,10 @@ window.__ModuleLoader__.load({
       var settingsScope = ctx.settingsScope.bind({ namespace: NS });
 
       var batch = createBatchController(
-        function (sessionId) {
-          return ctx.remote.commands.execute(sessionId, RETITLE_LINE, []);
+        function (sessionId, signal) {
+          // The 4th argument is the optional AbortSignal the descriptor's
+          // `cancellation` field allows; it is what makes Stop immediate.
+          return ctx.remote.commands.execute(sessionId, RETITLE_LINE, [], signal);
         },
         {
           /**
@@ -1082,6 +1115,27 @@ window.__ModuleLoader__.load({
             }
           },
           SettingsSection
+        );
+      });
+
+      // Global progress + stop control. `shell.overlay` is the shipped root-scope
+      // overlay layer, so the batch can be stopped from anywhere in the app —
+      // including after the settings page was closed, which is exactly when a run
+      // most needs a visible stop.
+      ctx.slots.inject("shell.overlay", function () {
+        return ctx.slots.register(
+          {
+            name: "shell.overlay",
+            id: "smart-session-title-batch",
+            order: 20,
+            // Plain string: this slot renders components, never a projected label.
+            label: "Batch retitle progress",
+            locale: NS,
+            inject: function () {
+              return { batch: batch };
+            }
+          },
+          BatchOverlayAction
         );
       });
 
@@ -1649,6 +1703,129 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Global batch indicator + stop control.
+     *
+     * Registered into the shipped `shell.overlay` slot (`kind: list`,
+     * `scope: root`, rendered inside the frame's overlay layer). The runner lives
+     * in plugin scope, so a batch keeps going after the settings page is closed —
+     * without this, the only way to stop it would be to reopen that page. It
+     * renders nothing unless a run is actually in flight, so an idle app is
+     * untouched.
+     *
+     * @param props.batch - the plugin-scope batch runner.
+     */
+    function BatchOverlayAction(props) {
+      var t = translatorOf(props);
+      var batch = props.batch;
+      var snapPair = react.useState(function () {
+        return batch !== undefined ? batch.getSnapshot() : idleBatchSnapshot();
+      });
+      var snap = snapPair[0];
+      var setSnap = snapPair[1];
+      var mounted = react.useRef(true);
+
+      react.useEffect(function () {
+        return function () {
+          mounted.current = false;
+        };
+      }, []);
+
+      react.useEffect(
+        function () {
+          if (batch === undefined) return undefined;
+          setSnap(batch.getSnapshot());
+          return batch.subscribe(function (next) {
+            if (mounted.current) setSnap(next);
+          });
+        },
+        [batch]
+      );
+
+      if (batch === undefined || snap.status !== "running") return null;
+
+      var percent = snap.total === 0 ? 0 : Math.round((snap.completed / snap.total) * 100);
+      var stopping = snap.cancelRequested === true;
+
+      // `shell.overlay`'s layer is pointer-events:none and only its direct child
+      // becomes interactive, so the pill positions itself and stays clickable.
+      return react.createElement(
+        "div",
+        {
+          "data-smart-session-title-batch": true,
+          style: {
+            position: "fixed",
+            right: 16,
+            bottom: 16,
+            zIndex: 21,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "6px 10px",
+            borderRadius: 999,
+            border: "1px solid var(--dsw-alias-border-l4)",
+            background: "var(--dsw-alias-bg-base)",
+            color: "var(--dsw-alias-label-secondary)",
+            boxShadow: "0 2px 10px rgba(0, 0, 0, 0.18)",
+            fontSize: 12
+          }
+        },
+        react.createElement(
+          "span",
+          { style: { display: "flex", flexDirection: "column", gap: 3, minWidth: 96 } },
+          react.createElement(
+            "span",
+            {},
+            t("overlay.running") + " " + String(snap.completed) + " / " + String(snap.total)
+          ),
+          react.createElement(
+            "span",
+            {
+              role: "progressbar",
+              "aria-valuemin": 0,
+              "aria-valuemax": snap.total,
+              "aria-valuenow": snap.completed,
+              style: {
+                height: 4,
+                borderRadius: 999,
+                background: "var(--dsw-alias-border-l4)",
+                overflow: "hidden"
+              }
+            },
+            react.createElement("span", {
+              style: {
+                display: "block",
+                height: "100%",
+                width: String(percent) + "%",
+                background: "var(--dsw-alias-label-tertiary)"
+              }
+            })
+          )
+        ),
+        react.createElement(
+          "button",
+          {
+            type: "button",
+            disabled: stopping,
+            onClick: function () {
+              batch.cancel();
+            },
+            style: {
+              padding: "3px 10px",
+              borderRadius: 999,
+              border: "1px solid var(--dsw-alias-border-l4)",
+              background: "transparent",
+              color: "inherit",
+              fontSize: 12,
+              cursor: stopping ? "default" : "pointer",
+              opacity: stopping ? 0.45 : 1
+            }
+          },
+          stopping ? t("overlay.stopping") : t("overlay.stop")
+        )
+      );
+    }
+
+    /**
      * "Optimize past titles" block: pick stored sessions, then batch-retitle them.
      *
      * Reads the stored Session list through the public `session.list` Remote
@@ -2084,20 +2261,6 @@ window.__ModuleLoader__.load({
               },
               t("batch.start") + " (" + String(selectedRows.length) + ")"
             ),
-            running
-              ? react.createElement(
-                  "button",
-                  {
-                    type: "button",
-                    style: buttonStyle,
-                    disabled: snap.cancelRequested === true,
-                    onClick: function () {
-                      batch.cancel();
-                    }
-                  },
-                  t("batch.cancel")
-                )
-              : null,
             !running && snap.failures.length > 0
               ? react.createElement(
                   "button",
@@ -2184,6 +2347,24 @@ window.__ModuleLoader__.load({
             snap.fallback === "failed"
               ? react.createElement("p", { role: "status", style: HINT_STYLE }, t("batch.fallbackFailed"))
               : null,
+            // Stop lives here rather than beside the selection buttons: it must
+            // stay reachable while a run is in flight, whatever state the list is
+            // in. The same control also sits in the global overlay, for when this
+            // page is closed.
+            running
+              ? react.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    style: Object.assign({}, buttonStyle, { marginTop: 4, marginBottom: 4 }),
+                    disabled: snap.cancelRequested === true,
+                    onClick: function () {
+                      batch.cancel();
+                    }
+                  },
+                  t("batch.cancel")
+                )
+              : null,
             running && snap.currentSessionId !== ""
               ? react.createElement(
                   "p",
@@ -2224,6 +2405,7 @@ window.__ModuleLoader__.load({
 
   exports.SettingsSection = SettingsSection;
   exports.BatchTitleOptimizer = BatchTitleOptimizer;
+  exports.BatchOverlayAction = BatchOverlayAction;
   exports.createBatchController = createBatchController;
   exports.selectBatchCandidates = selectBatchCandidates;
   exports.isBatchCandidate = isBatchCandidate;
