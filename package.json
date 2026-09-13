@@ -1,6 +1,6 @@
 {
   "name": "smart-session-title",
-  "version": "0.4.0-rc.1",
+  "version": "0.4.0-rc.2",
   "description": "Replacement session-title provider for DeepSeek Harness: compresses oversized first prompts instead of failing, and gates weak prompts.",
   "license": "MIT",
   "type": "module",
@@ -41,10 +41,10 @@
     "session-title"
   ],
   "peerDependencies": {
-    "@deepseek-ai/dsh-llm": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-session-title": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-llm": "^0.1.5-rc.1",
+    "@deepseek-ai/dsh-session-title": "^0.1.5-rc.1",
     "@deepseek-ai/schemastery": "3.18.2",
-    "@deepseek-ai/dsh-settings": "0.1.5-rc.1"
+    "@deepseek-ai/dsh-settings": "^0.1.5-rc.1"
   },
   "engines": {
     "node": ">=22.15.0"
