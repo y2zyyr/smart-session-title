@@ -50,7 +50,7 @@ window.__ModuleLoader__.load({
      * The two are kept in sync deliberately: `validation/verify-i18n.mjs`
      * fails when this string and package.json's `version` drift apart.
      */
-    var PLUGIN_VERSION = "0.5.0-rc.2";
+    var PLUGIN_VERSION = "0.5.0-rc.3";
 
     /**
      * Where the batch block remembers its automatic-fallback checkbox. It is a
@@ -100,11 +100,24 @@ window.__ModuleLoader__.load({
       "lock.failed": "锁定状态保存失败",
       // Settings nav label -----------------------------------------
       "nav": "智能会话标题",
+      "settings.saving": "保存中…",
+      "settings.saved": "已保存",
+      "settings.preferences": "标题设置",
+      "settings.expression": "表达方式",
+      "settings.lengthDate": "长度与日期",
+      "batch.open": "打开批量优化 →",
+      "batch.back": "← 返回标题设置",
+      "batch.search": "搜索标题或会话 ID",
+      "settings.modelHelp": "模型如何使用提示？",
+      "settings.preview": "格式示例（不调用模型）",
+      "settings.exampleAction": "优化登录页面的错误提示",
+      "settings.exampleShort": "登录错误提示",
+
       // Settings page ----------------------------------------------
       "settings.unavailable": "当前浏览器中无法使用此设置。",
       "settings.loading": "正在加载…",
       "settings.enabled": "AI 标题生成",
-      "settings.subtitle": "展开区域以调整设置。",
+      "settings.subtitle": "选择标题使用的模型，调整生成规则。普通设置自动保存。",
       "settings.defaultLength": "默认字数",
       "settings.characterUnit": "字",
       "settings.defaultParameters": "默认超时与重试",
@@ -113,8 +126,8 @@ window.__ModuleLoader__.load({
       "batch.summary": "选择会话后批量重新生成。",
       "batch.help": "费用与模型说明",
       "settings.modelLegend": "标题模型",
-      "settings.modeCurrent": "跟随当前会话模型",
-      "settings.modeConfigured": "指定模型",
+      "settings.modeCurrent": "跟随会话",
+      "settings.modeConfigured": "固定模型",
       "settings.modeDisabled": "已禁用",
       "settings.provider": "Provider",
       "settings.providerPlaceholder": "Provider ID",
@@ -125,8 +138,8 @@ window.__ModuleLoader__.load({
       "settings.manualModelHint": "该 Provider 未在此列出模型，请直接填写模型 ID。",
       "settings.directoryUnavailable": "无法读取 DSH 的模型目录，请手动填写 Provider 与模型 ID。",
       "settings.configuredNotice": "压缩后的首条提示将发送给所选 Provider。",
-      "settings.configuredUnsaved": "尚未生效：选择 Provider 和模型后，点击「保存指定模型」。",
-      "settings.saveRoute": "保存指定模型",
+      "settings.configuredUnsaved": "尚未生效：选择 Provider 和模型后，点击「保存固定模型」。",
+      "settings.saveRoute": "保存固定模型",
       "settings.invalidNumber": "请输入范围内的整数：",
       "settings.saveFailed": "设置保存失败。请检查填写内容与 DSH 日志。",
       "settings.disabledNote": "AI 标题已关闭。DSH 仍会根据首条提示设置 fallback 标题，人工重命名不受影响。",
@@ -136,13 +149,13 @@ window.__ModuleLoader__.load({
       "settings.advancedHint": "留空使用默认配置，下次生成时生效。",
       "settings.version": "版本",
       // Title shape + content: cap, date affix, style, language, exclusions ----
-      "settings.shapeLegend": "标题格式与内容",
+      "settings.shapeLegend": "标题规则",
       "settings.style": "风格",
-      "settings.styleDefault": "默认",
+      "settings.styleDefault": "动作＋对象（默认）",
       "settings.styleShortName": "简短任务名",
       "settings.styleActionObject": "动作＋对象",
       "settings.language": "语言",
-      "settings.languageAuto": "自动",
+      "settings.languageAuto": "跟随任务语言",
       "settings.languageZh": "中文",
       "settings.languageEn": "英文",
       "settings.contentHint": "「自动」跟随任务内容的主要语言；技术名称（React、API 等）保持原样。风格与语言适用于自动生成、手动重新生成和批量处理；改动不会重写已有标题。",
@@ -152,8 +165,8 @@ window.__ModuleLoader__.load({
       "settings.dateAffixPrefix": "前缀",
       "settings.dateAffixSuffix": "后缀",
       "settings.dateFormat": "日期格式",
-      "settings.dateFormatYmd": "2026-09-13",
-      "settings.dateFormatMd": "09-13",
+      "settings.dateFormatYmd": "年月日 · 2026-09-14",
+      "settings.dateFormatMd": "月日 · 09-14",
       "settings.shapeHint": "字数上限留空表示继承部署配置（80 字节，约 26 个汉字或 80 个西文字符）。日期取会话创建时间（本地时区），重新生成标题不会改变它；选择后缀时，字数会先为日期留出空间，确保日期不被截掉。",
       "settings.exclusions": "标题排除词",
       "settings.exclusionsBrief": "每行一个，最多 50 个。仅限插件生成的标题；不影响兜底标题、人工标题或对话原文。",
@@ -166,19 +179,19 @@ window.__ModuleLoader__.load({
       "batch.legend": "批量优化历史标题",
       "batch.intro": "仅处理选中的会话，也会覆盖人工修改的标题。",
       "batch.costHint": "每个会话一次模型调用：选得越多越慢，并产生相应的模型费用。",
-      "batch.routeHint": "「跟随当前会话模型」会使用每个会话自己记录的模型；旧会话记录的模型可能已不存在或凭据失效，此时改成「指定模型」再重试即可。",
+      "batch.routeHint": "「跟随会话」会使用每个会话自己记录的模型；旧会话记录的模型可能已不存在或凭据失效，此时改成「固定模型」再重试即可。",
       "batch.retryFailed": "重试失败项",
-      "batch.fallback": "失败后自动用「指定模型」重跑一次",
-      "batch.fallbackHint": "仅在已保存「指定模型」时可用：重跑期间标题路由会临时切到该模型，结束后自动恢复原设置（中途刷新窗口可能停在切换后的状态）。",
-      "batch.fallbackNeedsRoute": "先在「标题模型」里选好并保存「指定模型」，才能启用自动兜底。",
-      "batch.fallbackRunning": "正在用「指定模型」自动重跑失败项…",
-      "batch.fallbackDone": "已用「指定模型」自动重跑失败项。",
+      "batch.fallback": "失败后自动用「固定模型」重跑一次",
+      "batch.fallbackHint": "仅在已保存「固定模型」时可用：重跑期间标题路由会临时切到该模型，结束后自动恢复原设置（中途刷新窗口可能停在切换后的状态）。",
+      "batch.fallbackNeedsRoute": "先在「标题模型」里选好并保存「固定模型」，才能启用自动兜底。",
+      "batch.fallbackRunning": "正在用「固定模型」自动重跑失败项…",
+      "batch.fallbackDone": "已用「固定模型」自动重跑失败项。",
       "batch.fallbackFailed": "自动兜底或模式恢复失败，请检查标题模型设置。",
       "batch.fallbackCancelled": "自动重跑已停止。",
       "batch.error": "批量任务异常结束。",
       "batch.routeInUse": "生成模型",
       "batch.routeDead": "记录模型已不可用",
-      "batch.routeDeadSummary": "以下会话记录的模型已不在 DSH 中（跟随当前会话模型时它们必然失败，切到指定模型再重试）",
+      "batch.routeDeadSummary": "以下会话记录的模型已不在 DSH 中（跟随会话时它们必然失败，切到固定模型再重试）",
       "batch.load": "加载历史会话",
       "batch.reload": "重新加载",
       "batch.loading": "正在加载历史会话…",
@@ -231,6 +244,18 @@ window.__ModuleLoader__.load({
       // Settings nav label -----------------------------------------
       "nav": "Smart Session Title",
       // Settings page ----------------------------------------------
+      "settings.saving": "Saving\u2026",
+      "settings.saved": "Saved",
+      "settings.preferences": "Title settings",
+      "settings.expression": "Expression",
+      "settings.lengthDate": "Length and date",
+      "batch.open": "Open batch optimizer \u2192",
+      "batch.back": "\u2190 Back to title settings",
+      "batch.search": "Search titles or session IDs",
+      "settings.modelHelp": "How is the prompt used?",
+      "settings.preview": "Format example (no model call)",
+      "settings.exampleAction": "Improve login error messages",
+      "settings.exampleShort": "Login error messages",
       "settings.unavailable": "Settings are unavailable in this browser.",
       "settings.loading": "Loading…",
       "settings.enabled": "AI title generation",
@@ -282,8 +307,8 @@ window.__ModuleLoader__.load({
       "settings.dateAffixPrefix": "Prefix",
       "settings.dateAffixSuffix": "Suffix",
       "settings.dateFormat": "Date format",
-      "settings.dateFormatYmd": "2026-09-13",
-      "settings.dateFormatMd": "09-13",
+      "settings.dateFormatYmd": "年月日 · 2026-09-14",
+      "settings.dateFormatMd": "月日 · 09-14",
       "settings.shapeHint": "An empty character limit inherits the deployment config (80 bytes: about 26 CJK characters or 80 Latin characters). The date is the session's creation time in local time and does not move when a title is regenerated; a suffix date reserves its own space inside the limit so it is never cut off.",
       "settings.exclusions": "Excluded words",
       "settings.exclusionsBrief": "One per line · Up to 50 words or phrases. Applies only to plugin-generated titles.",
@@ -533,6 +558,12 @@ window.__ModuleLoader__.load({
     }
 
     var SETTINGS_CSS = `
+.sst-section { padding: 22px 0; border-top: 1px solid var(--dsw-alias-border-l4); }
+.sst-preview { padding: 14px 18px; margin-top: 18px; background: var(--dsw-alias-bg-base); border-left: 3px solid #8abcf4; }
+.sst-preview p { margin: 6px 0 0; font-size: 16px; }
+.sst-settings #sst-maxCharacters { width: 90px !important; }
+.sst-settings [hidden] { display: none !important; }
+.sst-batch { margin-top: 24px; }
 .sst-settings { container-type: inline-size; container-name: sst-settings; max-width: 760px; margin: 0 auto; padding: 4px 0 16px; font-size: 13px; line-height: 1.55; color: inherit; }
 .sst-settings * { box-sizing: border-box; }
 .sst-page-heading { margin: 0 0 20px; }
@@ -552,7 +583,7 @@ window.__ModuleLoader__.load({
 .sst-settings button:disabled { opacity: .5; cursor: default; }
 .sst-settings .sst-save-route { justify-self: start; padding: 7px 14px; font-weight: 500; }
 .sst-settings .sst-shape { display: flex; flex-direction: column; gap: 18px; margin: 0 !important; min-width: 0; }
-.sst-content-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.sst-content-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .sst-date-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .sst-exclusions { border-top: 1px solid var(--dsw-alias-border-l4); padding-top: 16px; }
 .sst-exclusions textarea { display: block; width: 100%; min-height: 88px; line-height: 1.6; padding: 10px 12px; margin-bottom: 8px; }
@@ -1651,9 +1682,15 @@ window.__ModuleLoader__.load({
       var catalogPair = react.useState(undefined);
       var catalog = catalogPair[0];
       var setCatalog = catalogPair[1];
+      var workspacePair = react.useState(false);
+      var statusPair = react.useState("");
       function save(ops) {
         setError("");
-        return persistSettings(scope, ops).catch(function () {
+        statusPair[1](t("settings.saving"));
+        return persistSettings(scope, ops).then(function () {
+          statusPair[1](t("settings.saved"));
+        }).catch(function () {
+          statusPair[1]("");
           setDraft({});
           setError(t("settings.saveFailed"));
         });
@@ -1821,10 +1858,11 @@ window.__ModuleLoader__.load({
           },
           react.createElement("input", {
             type: "checkbox",
-            checked: enabled,
+            checked: enabled && effectiveMode !== "disabled",
             disabled: busy,
             onChange: function (event) {
-              writeField("enabled", event.target.checked);
+              save([{ op: "set", path: ["enabled"], value: event.target.checked }].concat(event.target.checked && effectiveMode === "disabled" ? [{ op: "set", path: ["mode"], value: "current-session" }] : []));
+              if (event.target.checked && effectiveMode === "disabled") setDraft(Object.assign({}, draft, { mode: "current-session" }));
             }
           }),
           t("settings.enabled")
@@ -1844,7 +1882,7 @@ window.__ModuleLoader__.load({
             { style: { fontWeight: 500, marginBottom: 4, padding: 0, fontSize: 13 } },
             t("settings.modelLegend")
           ),
-          ["current-session", "configured", "disabled"].map(function (mode) {
+          ["current-session", "configured"].map(function (mode) {
             return react.createElement(
               "label",
               {
@@ -2048,7 +2086,7 @@ window.__ModuleLoader__.load({
           react.createElement(
             "p",
             { key: "privacy", style: Object.assign({ marginTop: 0, marginBottom: 12 }, hintStyle) },
-            t("settings.configuredNotice")
+            react.createElement("details", {}, react.createElement("summary", {}, t("settings.modelHelp")), t("settings.configuredNotice"))
           )
         );
       }
@@ -2058,7 +2096,7 @@ window.__ModuleLoader__.load({
         var providerId = (draft.provider !== undefined ? draft.provider : (value.provider || "")).trim();
         var modelId = (draft.model !== undefined ? draft.model : (value.model || "")).trim();
         children.push(react.createElement("button", {
-          key: "save-route", className: "sst-save-route", type: "button", disabled: busy || !providerId || !modelId,
+          key: "save-route", className: "sst-save-route", type: "button", disabled: busy || !providerId || !modelId || (chosenMode === "configured" && providerId === value.provider && modelId === value.model),
           onClick: function () {
             save([
               { op: "set", path: ["provider"], value: providerId },
@@ -2098,6 +2136,7 @@ window.__ModuleLoader__.load({
             { style: { fontWeight: 500, marginBottom: 4, padding: 0, fontSize: 13 } },
             t("settings.shapeLegend")
           ),
+          react.createElement("h4", { style: { margin: 0 } }, t("settings.expression")),
           react.createElement("div", { className: "sst-content-fields" },
           // Phrasing and language. Both are enums whose empty option is the unset
           // that follows the plugin default / the message's own language, so the UI
@@ -2142,6 +2181,9 @@ window.__ModuleLoader__.load({
               react.createElement("option", { value: "en" }, t("settings.languageEn"))
             )
           ),
+          ),
+          react.createElement("h4", { style: { margin: 0 } }, t("settings.lengthDate")),
+          react.createElement("div", { className: "sst-date-fields" },
           react.createElement(
             "div",
             { style: { marginBottom: 6 } },
@@ -2159,9 +2201,7 @@ window.__ModuleLoader__.load({
                 writeField("maxTitleCharacters", event.target.value);
               }
             })
-          )
           ),
-          react.createElement("div", { className: "sst-date-fields" },
           react.createElement(
             "div",
             { style: { marginBottom: 6 } },
@@ -2186,7 +2226,7 @@ window.__ModuleLoader__.load({
           ),
           react.createElement(
             "div",
-            { style: { marginBottom: 6 } },
+            { hidden: !user.titleDatePosition, style: { marginBottom: 6 } },
             react.createElement("label", { style: labelStyle, htmlFor: "sst-dateFormat" }, t("settings.dateFormat")),
             react.createElement(
               "select",
@@ -2290,9 +2330,9 @@ window.__ModuleLoader__.load({
           t: t,
           batch: props.batch,
           listSessions: props.listSessions,
-          disabled: !enabled || effectiveMode === "disabled",
+          disabled: !enabled || value.mode === "disabled",
           route: {
-            mode: effectiveMode,
+            mode: value.mode || "current-session",
             provider: value.provider || "",
             model: value.model || ""
           },
@@ -2333,17 +2373,31 @@ window.__ModuleLoader__.load({
         typeof value.maxAttempts === "number" ? t("settings.maxAttempts") + " " + value.maxAttempts : ""
       ].filter(Boolean).join(" · ") || t("settings.defaultParameters");
 
+      var example = t(user.titleStyle === "short-name" ? "settings.exampleShort" : "settings.exampleAction");
+      var exampleDate = user.titleDateFormat === "md" ? "09-14" : "2026-09-14";
+      if (user.titleDatePosition === "prefix") example = exampleDate + " · " + example;
+      if (user.titleDatePosition === "suffix") example += " · " + exampleDate;
       return react.createElement("div", { className: "sst-settings" },
         react.createElement("style", {}, SETTINGS_CSS),
-        react.createElement("header", { className: "sst-page-heading" },
-          react.createElement("h2", {}, t("nav")),
-          react.createElement("p", {}, t("settings.subtitle"))),
-        error ? react.createElement("p", { role: "alert" }, error) : null,
-        settingsDisclosure(t("settings.modelLegend"), modelSummary,
-          react.createElement("div", { className: "sst-model-card" }, children.slice(0, shapeIndex))),
-        settingsDisclosure(t("settings.shapeLegend"), shapeSummary, children[shapeIndex]),
-        settingsDisclosure(t("settings.advanced"), advancedSummary, children[advancedIndex]),
-        children[batchIndex],
+        workspacePair[0] ? react.createElement("div", {},
+          react.createElement("button", { type: "button", onClick: function () { workspacePair[1](false); } }, t("batch.back")),
+          children[batchIndex]) : react.createElement("div", {},
+          react.createElement("header", { className: "sst-page-heading" },
+            react.createElement("h2", {}, t("nav")), children[0],
+            react.createElement("p", {}, modelSummary + " · " + shapeSummary),
+            react.createElement("p", {}, t("settings.subtitle"))),
+          error ? react.createElement("p", { role: "alert" }, error) : null,
+          react.createElement("p", { role: "status", "aria-live": "polite" }, statusPair[0]),
+          react.createElement("section", { className: "sst-section" },
+            react.createElement("div", { className: "sst-model-card" }, children.slice(1, shapeIndex))),
+          react.createElement("section", { className: "sst-section" }, children[shapeIndex],
+            react.createElement("aside", { className: "sst-preview" },
+              react.createElement("small", {}, t("settings.preview")), react.createElement("p", {}, example))),
+          settingsDisclosure(t("settings.advanced"), advancedSummary, children[advancedIndex]),
+          react.createElement("section", { className: "sst-section" },
+            react.createElement("h3", {}, t("batch.legend")),
+            react.createElement("p", {}, t("batch.summary")),
+            react.createElement("button", { type: "button", onClick: function () { workspacePair[1](true); } }, t("batch.open")))),
         children[batchIndex + 1]);
     }
 
@@ -2517,6 +2571,7 @@ window.__ModuleLoader__.load({
       var autoFallback = fallbackPair[0];
       var setAutoFallback = fallbackPair[1];
 
+      var searchPair = react.useState("");
       var mounted = react.useRef(true);
       var lastStatus = react.useRef(snap.status);
       react.useEffect(function () {
@@ -2539,8 +2594,8 @@ window.__ModuleLoader__.load({
       // The runner owns the flag (it may fire the fallback pass long after this
       // page is closed), so keep it in step with the remembered preference.
       react.useEffect(function () {
-        if (batch !== undefined) batch.setAutoFallback(autoFallback);
-      }, [batch, autoFallback]);
+        if (batch !== undefined) batch.setAutoFallback(autoFallback && (!props.route || props.route.mode !== "configured"));
+      }, [batch, autoFallback, props.route && props.route.mode]);
 
       function load() {
         if (listSessions === undefined) return;
@@ -2570,9 +2625,13 @@ window.__ModuleLoader__.load({
           );
       }
 
+      var initialLoad = react.useRef(false);
+      react.useEffect(function () {
+        if (!initialLoad.current) { initialLoad.current = true; load(); }
+      }, [listSessions]);
+
       // A finished run rewrote titles: reload the rows so the list shows them.
-      // Guarded on `rows !== undefined` so merely opening the page never starts
-      // an unrequested list load, and on the status change so one run refreshes
+      // Guarded on the status change so one run refreshes
       // exactly once (a short run can go idle → done without an observed middle).
       react.useEffect(function () {
         var previous = lastStatus.current;
@@ -2638,6 +2697,8 @@ window.__ModuleLoader__.load({
         if (cwd !== "" && cwds.indexOf(cwd) === -1) cwds.push(cwd);
       }
       var visible = cwdFilter === "" ? list : list.filter(function (row) { return row.cwd === cwdFilter; });
+      var query = searchPair[0].trim().toLocaleLowerCase();
+      if (query) visible = visible.filter(function (row) { return (titleOfSessionRow(row) + " " + row.sessionId).toLocaleLowerCase().includes(query); });
       var ROW_LIMIT = 300;
       var truncated = visible.length > ROW_LIMIT;
       if (truncated) visible = visible.slice(0, ROW_LIMIT);
@@ -2917,7 +2978,8 @@ window.__ModuleLoader__.load({
         children.push(
           react.createElement(
             "div",
-            { key: "actions", style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 8 } },
+            { key: "actions", style: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 8 } },
+            react.createElement("p", { style: { flexBasis: "100%", margin: "8px 0", fontSize: 12 } }, t("batch.intro")),
             react.createElement(
               "button",
               {
@@ -3071,8 +3133,8 @@ window.__ModuleLoader__.load({
         );
       }
 
-      return react.createElement("details", { className: "sst-card sst-batch", open: running ? true : undefined },
-        react.createElement("summary", {},
+      return react.createElement("section", { className: "sst-batch" },
+        react.createElement("h2", {},
           react.createElement("span", {}, t("batch.legend")),
           react.createElement("span", { className: "sst-batch-summary" },
             running ? t("batch.running") + " · " + snap.completed + " / " + snap.total : t("batch.summary"))),
@@ -3080,7 +3142,8 @@ window.__ModuleLoader__.load({
           children[1],
           react.createElement("details", { className: "sst-batch-help" },
             react.createElement("summary", {}, t("batch.help")), children[2], children[3]),
-          children.slice(4)));
+          react.createElement("input", { type: "search", "aria-label": t("batch.search"), placeholder: t("batch.search"), value: searchPair[0], onChange: function (event) { searchPair[1](event.target.value); } }),
+          children.slice(4).filter(function (child) { return !(props.route && props.route.mode === "configured" && ((child.key || child.props.key) === "fallback" || (child.key || child.props.key) === "fallback-hint")); })));
 
     }
 

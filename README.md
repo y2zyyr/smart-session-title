@@ -3,7 +3,10 @@
 English | [简体中文](README.zh-CN.md)
 
 Smarter automatic session titles for **DeepSeek Harness (DSH)**.
-**0.5.0-rc.2 — release candidate**, intended for the npm `next` tag.
+**0.5.0-rc.3 — release candidate**, intended for the npm `next` tag.
+
+
+The settings page now shows model and title rules directly, with advanced options collapsed and visible save feedback. Batch optimization has a separate workspace with automatic loading, title/ID search, and back navigation. Batch routing reflects saved settings; fixed-model mode hides redundant automatic fallback. Date format appears only when a date affix is enabled.
 
 ## What it does
 

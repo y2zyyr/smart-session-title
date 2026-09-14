@@ -919,13 +919,9 @@ let uiText = renderTree(uiTree).join(" ");
 if (!uiText.includes(tZh("batch.legend")) || !uiText.includes(tZh("batch.intro"))) {
   throw new Error("batch block did not render its legend/intro");
 }
-if (collectInputs(uiTree, "checkbox").length !== 0) {
-  throw new Error("batch rows must not render before the list is loaded");
-}
-const loadButton = collectButtons(uiTree).find((b) => b.text === tZh("batch.load"));
-if (!loadButton) throw new Error("batch load button missing");
-loadButton.props.onClick();
-uiTree = await flush(capturedExport.BatchTitleOptimizer, batchProps, uiTree);
+if (listCalls !== 1) throw new Error("batch workspace must load once on entry");
+const loadButton = collectButtons(uiTree).find((b) => b.text === tZh("batch.reload"));
+if (!loadButton) throw new Error("batch refresh button missing");
 uiText = renderTree(uiTree).join(" ");
 if (!uiText.includes("Old title one") || !uiText.includes("Old title two")) {
   throw new Error("loaded batch rows did not render their current titles");
@@ -973,7 +969,7 @@ const detachBatch = capturedExport.createBatchController((sessionId) => {
 });
 const detachProps = { t: tZh, batch: detachBatch, listSessions: uiListSessions, disabled: false };
 let detachTree = await settle(capturedExport.BatchTitleOptimizer, detachProps);
-collectButtons(detachTree).find((b) => b.text === tZh("batch.load")).props.onClick();
+collectButtons(detachTree).find((b) => b.text === tZh("batch.reload")).props.onClick();
 detachTree = await flush(capturedExport.BatchTitleOptimizer, detachProps, detachTree);
 collectButtons(detachTree).find((b) => b.text === tZh("batch.selectAll")).props.onClick();
 detachTree = await flush(capturedExport.BatchTitleOptimizer, detachProps, detachTree);
@@ -1021,7 +1017,7 @@ let retryTree = await settle(capturedExport.BatchTitleOptimizer, retryProps);
 if (!renderTree(retryTree).join(" ").includes(tZh("batch.routeHint"))) {
   throw new Error("batch block must explain the current-session route caveat");
 }
-collectButtons(retryTree).find((b) => b.text === tZh("batch.load")).props.onClick();
+collectButtons(retryTree).find((b) => b.text === tZh("batch.reload")).props.onClick();
 retryTree = await flush(capturedExport.BatchTitleOptimizer, retryProps, retryTree);
 collectButtons(retryTree).find((b) => b.text === tZh("batch.selectAll")).props.onClick();
 retryTree = await flush(capturedExport.BatchTitleOptimizer, retryProps, retryTree);
@@ -1057,7 +1053,7 @@ const offText = renderTree(offTree).join(" ");
 if (!offText.includes(tZh("batch.disabled"))) {
   throw new Error("disabled batch block must explain why it is off");
 }
-collectButtons(offTree).find((b) => b.text === tZh("batch.load")).props.onClick();
+collectButtons(offTree).find((b) => b.text === tZh("batch.reload")).props.onClick();
 const offLoaded = await flush(capturedExport.BatchTitleOptimizer, {
   t: tZh, batch: capturedExport.createBatchController(() => Promise.resolve()), listSessions: uiListSessions, disabled: true
 }, offTree);
@@ -1172,7 +1168,7 @@ const deadRowTree = await settle(capturedExport.BatchTitleOptimizer, {
   disabled: false,
   catalog: { providers: [{ id: "scnet", name: "SCNet" }], byProvider: { scnet: ["DeepSeek-V4-Flash"] }, byNs: {} }
 });
-collectButtons(deadRowTree).find((b) => b.text === tZh("batch.load")).props.onClick();
+collectButtons(deadRowTree).find((b) => b.text === tZh("batch.reload")).props.onClick();
 const deadRowLoaded = await flush(capturedExport.BatchTitleOptimizer, {
   t: tZh,
   batch: capturedExport.createBatchController(() => Promise.resolve()),
@@ -1423,7 +1419,7 @@ const pageGated = capturedExport.createBatchController((sessionId, signal) => {
 });
 const pageProps = { t: tZh, batch: pageGated, listSessions: uiListSessions, disabled: false };
 let pageTree = await settle(capturedExport.BatchTitleOptimizer, pageProps);
-collectButtons(pageTree).find((b) => b.text === tZh("batch.load")).props.onClick();
+collectButtons(pageTree).find((b) => b.text === tZh("batch.reload")).props.onClick();
 pageTree = await flush(capturedExport.BatchTitleOptimizer, pageProps, pageTree);
 collectButtons(pageTree).find((b) => b.text === tZh("batch.selectAll")).props.onClick();
 pageTree = await flush(capturedExport.BatchTitleOptimizer, pageProps, pageTree);
@@ -1836,7 +1832,7 @@ const lockBatchProps = {
   lockedSessionIds: ["lock-me"]
 };
 let lockBatchTree = await settle(capturedExport.BatchTitleOptimizer, lockBatchProps);
-collectButtons(lockBatchTree).find((b) => b.text === tZh("batch.load")).props.onClick();
+collectButtons(lockBatchTree).find((b) => b.text === tZh("batch.reload")).props.onClick();
 lockBatchTree = await flush(capturedExport.BatchTitleOptimizer, lockBatchProps, lockBatchTree);
 const lockBatchText = renderTree(lockBatchTree).join(" ");
 if (!lockBatchText.includes(tZh("batch.count") + ": 1")) {
@@ -2303,27 +2299,39 @@ assert(racedRestore.fallback === "failed", "revision-conflicted restore must be 
 face.scope.mutate = realMutate;
 fakeRemote.commands.execute = originalExecute;
 console.log("✓ audit: fixed revision prevents a concurrent restore overwrite");
-// The disclosure is presentation only: the controller remains mounted and
-// running batches expose Stop without requiring the user to expand the tool.
-const disclosureBatch = capturedExport.createBatchController(() => Promise.resolve(successOutcome));
-let disclosureTree = await settle(capturedExport.BatchTitleOptimizer, { t: tZh, batch: disclosureBatch, listSessions: uiListSessions });
-assert(disclosureTree.type === "details" && disclosureTree.props.open !== true, "batch tool should start collapsed");
-const runningFace = { ...disclosureBatch, getSnapshot: () => ({ ...disclosureBatch.getSnapshot(), status: "running", total: 2, completed: 1 }) };
-disclosureTree = await settle(capturedExport.BatchTitleOptimizer, { t: tZh, batch: runningFace, listSessions: uiListSessions });
-assert(disclosureTree.props.open === true, "a running batch should expand its controls");
-assert(findFirstElement(disclosureTree, n => n.type === "button" && renderTree(n).join("").includes(tZh("batch.cancel"))), "expanded batch must retain Stop");
-console.log("✓ layout: batch starts collapsed and expands while running with Stop available");
-fakeScopeSnapshot = { status: "ready", writable: true,
-  value: { enabled: true, mode: "configured", provider: "scnet", model: "m", maxTitleCharacters: 25 },
-  user: { mode: "configured", provider: "scnet", model: "m", maxTitleCharacters: 25 } };
+// Workspace navigation and persisted route semantics in both locales.
+const workspaceBatch = capturedExport.createBatchController(() => Promise.resolve(successOutcome));
 for (const translate of [tZh, tEn]) {
-  const foldedTree = await settle(capturedExport.SettingsSection, { scope, t: translate });
-  const cards = foldedTree.children.filter(n => n?.type === "details");
-  assert(cards.length === 3 && cards.every(n => n.props.open !== true), "model, format and advanced cards must all start collapsed");
-  const summaries = cards.map(n => renderTree(n.children[0]).join(" "));
-  assert(summaries[0].includes("scnet / m"), "model summary must show the saved route");
-  assert(summaries[1].includes("25") && summaries[1].includes(translate("settings.dateAffixOff")), "format summary must show the character cap and date setting");
-  assert(summaries[2].includes(translate("settings.defaultParameters")), "advanced summary must explain inherited defaults");
+  fakeScopeSnapshot = { status: "ready", writable: true,
+    value: { enabled: true, mode: "configured", provider: "scnet", model: "m", maxTitleCharacters: 25 },
+    user: { mode: "configured", provider: "scnet", model: "m", maxTitleCharacters: 25 } };
+  const props = { scope, t: translate, batch: workspaceBatch, listSessions: uiListSessions };
+  let tree = await settle(capturedExport.SettingsSection, props);
+  assert(!findFirstElement(tree, n => n.type === capturedExport.BatchTitleOptimizer), "batch workspace must not mount in settings");
+  assert(collectInputs(tree, "radio").length === 2, "model picker has two choices");
+  assert(renderTree(tree).join(" ").includes("scnet / m"), "heading shows saved model");
+  assert(findFirstElement(tree, n => n.props?.hidden === true && findFirstElement(n, c => c.props?.id === "sst-dateFormat")), "date format hidden without date affix");
+  collectButtons(tree).find(b => b.text === translate("batch.open")).props.onClick();
+  tree = await flush(capturedExport.SettingsSection, props, tree);
+  const batchNode = findFirstElement(tree, n => n.type === capturedExport.BatchTitleOptimizer);
+  assert(batchNode && batchNode.props.route.model === "m", "workspace uses saved route");
+  collectButtons(tree).find(b => b.text === translate("batch.back")).props.onClick();
+  tree = await flush(capturedExport.SettingsSection, props, tree);
+  assert(!findFirstElement(tree, n => n.type === capturedExport.BatchTitleOptimizer), "back returns to settings");
 }
-console.log("✓ layout: all settings cards collapse with localized saved-setting summaries");
+let workspaceTree = await settle(capturedExport.BatchTitleOptimizer, {
+  t: tZh, batch: workspaceBatch, listSessions: uiListSessions,
+  route: { mode: "configured", provider: "scnet", model: "m" }
+});
+assert(workspaceTree.type === "section", "batch is a standalone workspace");
+assert(!renderTree(workspaceTree).includes(tZh("batch.fallback")), "fixed model hides redundant fallback");
+assert(!workspaceBatch.isAutoFallback(), "fixed model disables automatic fallback");
+const search = collectInputs(workspaceTree, "search")[0];
+search.props.onChange({ target: { value: "Old title one" } });
+workspaceTree = await flush(capturedExport.BatchTitleOptimizer, { t: tZh, batch: workspaceBatch, listSessions: uiListSessions }, workspaceTree);
+assert(renderTree(workspaceTree).join(" ").includes("Old title one") && !renderTree(workspaceTree).join(" ").includes("Old title two"), "search filters titles");
+const runningFace = { ...workspaceBatch, getSnapshot: () => ({ ...workspaceBatch.getSnapshot(), status: "running", total: 2, completed: 1 }) };
+workspaceTree = await settle(capturedExport.BatchTitleOptimizer, { t: tZh, batch: runningFace, listSessions: uiListSessions });
+assert(findFirstElement(workspaceTree, n => n.type === "button" && renderTree(n).join("").includes(tZh("batch.cancel"))), "workspace retains Stop");
+console.log("✓ redesign: navigation, saved route, conditional date, model choices, search and Stop");
 console.log("\n✅ ALL TESTS PASSED");
