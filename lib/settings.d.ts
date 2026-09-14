@@ -17,8 +17,23 @@ import type { AffixDateFormat, AffixPosition } from "./title-affix.js";
 export declare const SETTINGS_NAMESPACE = "smart-session-title";
 /** How the title model route is chosen. */
 export type TitleMode = "current-session" | "configured" | "disabled";
+/** How the title is phrased; unset means the plugin's own default. */
+export type TitleStyle = "action-object" | "short-name";
+/** Language the title is written in; unset means "follow the message". */
+export type TitleLanguage = "zh" | "en";
 /** Every supported mode, in UI order. */
 export declare const TITLE_MODES: readonly TitleMode[];
+/**
+ * Every EXPLICIT phrasing, in UI order. The empty selection ("Default") is an
+ * unset, not a member: an unset style follows the plugin's default policy, which
+ * today is action + object.
+ */
+export declare const TITLE_STYLES: readonly TitleStyle[];
+/**
+ * Every EXPLICIT title language, in UI order. An unset language follows the
+ * language primarily used by the human message (the pre-existing behaviour).
+ */
+export declare const TITLE_LANGUAGES: readonly TitleLanguage[];
 /**
  * The user-writable slice of this plugin's configuration.
  *
@@ -46,6 +61,30 @@ export interface TitleSettings {
     readonly titleDatePosition: AffixPosition | undefined;
     /** Date shape; undefined means `ymd` wherever a position is set. */
     readonly titleDateFormat: AffixDateFormat | undefined;
+    /** Explicit phrasing, or undefined to follow the plugin default. */
+    readonly titleStyle: TitleStyle | undefined;
+    /** Explicit title language, or undefined to follow the message. */
+    readonly titleLanguage: TitleLanguage | undefined;
+    /**
+     * Words that must not appear in a title this plugin generates.
+     *
+     * `undefined` (never configured) and an empty list are the same state. Each
+     * entry is matched literally — case-insensitively for entries containing
+     * ASCII letters, exactly otherwise. Deleting a term from the message is the
+     * pre-generation treatment; the same deletion is the deterministic last
+     * resort when one survives into the model's output.
+     */
+    readonly titleExclusions: readonly string[] | undefined;
+    /**
+     * Sessions whose title is locked.
+     *
+     * `undefined` (never locked anything) and an empty list are the same state.
+     * A lock blocks every path this plugin owns that would rewrite the title,
+     * including the deliberate `/retitle` route and its batch run. It cannot
+     * block DSH Core's own fallback for a session that still has no title, nor a
+     * manual rename performed in DSH's UI.
+     */
+    readonly lockedSessionIds: readonly string[] | undefined;
 }
 /** Values the schema/bundle layer supplies when the user has chosen nothing. */
 export declare const SETTINGS_BASE: {
@@ -61,6 +100,10 @@ export declare const SETTINGS_LIMITS: Readonly<{
     maxAttemptsMax: 3;
     maxTitleCharactersMin: 8;
     maxTitleCharactersMax: 120;
+    maxTitleExclusions: 50;
+    maxTitleExclusionCharacters: 64;
+    maxLockedSessions: 500;
+    lockedSessionCharacters: 64;
 }>;
 /**
  * Validate one resolved settings value.
@@ -84,6 +127,18 @@ export declare function resolveTitleSettings(raw: unknown): TitleSettings;
  */
 export declare function isAiTitleDisabled(settings: TitleSettings): boolean;
 /**
+ * Whether one session's title is locked.
+ *
+ * A lock blocks every path this plugin owns that would rewrite the title,
+ * including the deliberate `/retitle` route and its batch run. It does not block
+ * DSH Core's fallback for a session with no title yet, nor a manual rename.
+ *
+ * @param settings - the settings in force right now.
+ * @param sessionId - the session to test.
+ * @returns whether this session is locked.
+ */
+export declare function isSessionTitleLocked(settings: TitleSettings, sessionId: string): boolean;
+/**
  * Layer settings over the composition config.
  *
  * Settings win for the two numbers the UI exposes; everything else — and in
@@ -92,8 +147,10 @@ export declare function isAiTitleDisabled(settings: TitleSettings): boolean;
  * touched here.
  *
  * The title-shape fields (`maxTitleCharacters`, `titleDatePosition`,
- * `titleDateFormat`) are deliberately NOT merged: they have no composition
- * equivalent, and the provider reads them from the settings half of the policy
- * so an absent value keeps meaning "no cap" / "no affix".
+ * `titleDateFormat`) and the title-content fields (`titleStyle`,
+ * `titleLanguage`, `titleExclusions`) are deliberately NOT merged: they have no
+ * composition equivalent, and the provider reads them from the settings half of
+ * the policy so an absent value keeps meaning "no cap" / "no affix" / "no
+ * preference" / "no exclusions".
  */
 export declare function applySettingsToTitleConfig(base: TitleConfig, settings: TitleSettings): TitleConfig;

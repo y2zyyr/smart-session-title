@@ -8,6 +8,7 @@ const obs = await import(B + "observability.js");
 const affix = await import(B + "title-affix.js");
 const conf = await import(B + "config.js");
 const settings = await import(B + "settings.js");
+const commands = await import(B + "commands.js");
 
 let pass = 0, fail = 0;
 const t = (name, got, want) => {
@@ -114,6 +115,132 @@ t("empty object -> enabled true, mode undefined", [settings.resolveTitleSettings
 t("timeoutMs out of range refused", (() => { try { settings.resolveTitleSettings({timeoutMs: 500}); return "no-throw"; } catch { return "throw"; } })(), "throw");
 t("maxTitleCharacters 121 refused", (() => { try { settings.resolveTitleSettings({maxTitleCharacters: 121}); return "no-throw"; } catch { return "throw"; } })(), "throw");
 t("title shape stays out of row config", "maxTitleCharacters" in settings.applySettingsToTitleConfig(conf.resolveTitleConfig({}), settings.resolveTitleSettings({maxTitleCharacters: 10})), false);
+
+// --- title content settings (style / language / exclusions)
+const prompt = await import(B + "title-prompt.js");
+t("style accepted", settings.resolveTitleSettings({titleStyle: "short-name"}).titleStyle, "short-name");
+t("language accepted", settings.resolveTitleSettings({titleLanguage: "en"}).titleLanguage, "en");
+t("absent style stays undefined", settings.resolveTitleSettings({enabled: true}).titleStyle, undefined);
+t("unknown style refused", (() => { try { settings.resolveTitleSettings({titleStyle: "terse"}); return "no-throw"; } catch { return "throw"; } })(), "throw");
+t("unknown language refused", (() => { try { settings.resolveTitleSettings({titleLanguage: "fr"}); return "no-throw"; } catch { return "throw"; } })(), "throw");
+t("exclusions trim, drop blanks and dedupe", settings.resolveTitleSettings({titleExclusions: ["  客户甲 ", "", "客户甲", "Acme"]}).titleExclusions, ["客户甲", "Acme"]);
+t("all-blank exclusions -> undefined", settings.resolveTitleSettings({titleExclusions: ["  ", ""]}).titleExclusions, undefined);
+t("exclusions accepted as empty list", settings.resolveTitleSettings({titleExclusions: []}).titleExclusions, undefined);
+t("non-list exclusions refused", (() => { try { settings.resolveTitleSettings({titleExclusions: "客户甲"}); return "no-throw"; } catch { return "throw"; } })(), "throw");
+t("non-string exclusion refused", (() => { try { settings.resolveTitleSettings({titleExclusions: [7]}); return "no-throw"; } catch { return "throw"; } })(), "throw");
+t("over-long exclusion refused", (() => { try { settings.resolveTitleSettings({titleExclusions: ["x".repeat(65)]}); return "no-throw"; } catch { return "throw"; } })(), "throw");
+t("over-count exclusions refused", (() => { try { settings.resolveTitleSettings({titleExclusions: Array.from({length: 51}, (_, i) => `term${i}`)}); return "no-throw"; } catch { return "throw"; } })(), "throw");
+t("multi-line exclusion refused", (() => { try { settings.resolveTitleSettings({titleExclusions: ["客户\n甲"]}); return "no-throw"; } catch { return "throw"; } })(), "throw");
+t("content fields stay out of row config", ["titleStyle", "titleLanguage", "titleExclusions"].some((key) => key in settings.applySettingsToTitleConfig(conf.resolveTitleConfig({}), settings.resolveTitleSettings({titleStyle: "short-name", titleLanguage: "en", titleExclusions: ["x"]}))), false);
+
+// --- exclusions in the policy: redact before sending, detect after
+const exclusions = settings.resolveTitleSettings({titleExclusions: ["客户甲", "Acme"]}).titleExclusions;
+const compiled = policy.compileTitleExclusions(exclusions);
+const taskWithNames = "修复客户甲的订单导出错误，Acme 的 API 也要改";
+const redacted = policy.prepareTitleInput(taskWithNames, cfg, exclusions);
+t("CJK term removed before sending", redacted.text.includes("客户甲"), false);
+t("latin term removed case-insensitively", /acme/iu.test(redacted.text), false);
+t("redaction counted", redacted.excludedTerms, 2);
+t("redacted text stays readable", redacted.text.startsWith("修复的订单导出错误"), true);
+t("surrounding text is kept", redacted.text.includes("订单导出错误"), true);
+t("byte counts still describe the original", redacted.rawBytes, policy.byteLength(taskWithNames));
+const unconfigured = policy.prepareTitleInput(taskWithNames, cfg);
+t("no exclusions -> text untouched", unconfigured.text.includes("客户甲"), true);
+t("no exclusions -> zero count", unconfigured.excludedTerms, 0);
+t("no exclusions -> identical to the old result", unconfigured.text, policy.prepareTitleInput(taskWithNames, cfg, undefined).text);
+t("line structure survives redaction", policy.prepareTitleInput("第一行客户甲\n\n第二行 Acme", cfg, exclusions).text, "第一行\n\n第二行");
+t("empty result is detectable", policy.prepareTitleInput("客户甲", cfg, exclusions).text.length, 0);
+// Literal matching: a term is text, never a pattern.
+t("a dot in a term is not a wildcard", policy.redactExcludedTerms("abc", policy.compileTitleExclusions(["a.c"])).removed, 0);
+t("a dot in a term matches literally", policy.redactExcludedTerms("a.c", policy.compileTitleExclusions(["a.c"])).removed, 1);
+t("an empty term is ignored", policy.compileTitleExclusions(["", "客户甲"]).length, 1);
+t("non-array exclusions compile to nothing", policy.compileTitleExclusions(undefined).length, 0);
+t("a term occurring twice is counted twice", policy.redactExcludedTerms("Acme 和 ACME", compiled).removed, 2);
+// The post-check runs on the string that would be stored.
+t("findExcludedTerm finds a CJK term", policy.findExcludedTerm("修复客户甲的订单", compiled), "客户甲");
+t("findExcludedTerm ignores ASCII case", policy.findExcludedTerm("Fix ACME login", compiled), "Acme");
+t("findExcludedTerm passes a clean title", policy.findExcludedTerm("修复订单导出", compiled), undefined);
+t("findExcludedTerm with no list", policy.findExcludedTerm("客户甲", []), undefined);
+
+// --- prompt: preferences REPLACE the defaults instead of stacking
+const promptConfig = conf.resolveTitleConfig({});
+const ACTION_RULE = "Prefer action + object";
+const AUTO_LANGUAGE_RULE = "Use the language primarily used by the human message";
+const defaultPrompt = prompt.buildSystemPrompt(promptConfig, {});
+t("default prompt keeps action + object", defaultPrompt.includes(ACTION_RULE), true);
+t("default prompt keeps the auto language rule", defaultPrompt.includes(AUTO_LANGUAGE_RULE), true);
+t("explicit action-object == default", prompt.buildSystemPrompt(promptConfig, {style: "action-object"}), defaultPrompt);
+const shortPrompt = prompt.buildSystemPrompt(promptConfig, {style: "short-name"});
+t("short-name drops the action + object rule", shortPrompt.includes(ACTION_RULE), false);
+t("short-name states its own rule", shortPrompt.includes("compact noun phrase"), true);
+t("short-name adds its own anchor", shortPrompt.includes("登录接口超时"), true);
+t("short-name with auto language anchors both languages", [shortPrompt.includes("登录接口超时"), shortPrompt.includes("Login endpoint timeout")], [true, true]);
+t("short-name with a pinned language anchors only that one", prompt.buildSystemPrompt(promptConfig, {style: "short-name", language: "en"}).includes("登录接口超时"), false);
+t("default prompt has no short-name anchor", defaultPrompt.includes("登录接口超时"), false);
+const zhPrompt = prompt.buildSystemPrompt(promptConfig, {language: "zh"});
+t("zh drops the auto language rule", zhPrompt.includes(AUTO_LANGUAGE_RULE), false);
+t("zh names the language", zhPrompt.includes("Simplified Chinese"), true);
+const enPrompt = prompt.buildSystemPrompt(promptConfig, {language: "en"});
+t("en drops the auto language rule", enPrompt.includes(AUTO_LANGUAGE_RULE), false);
+t("en keeps the identifier rule", enPrompt.includes("React, API"), true);
+t("en anchors a Chinese message to an English title", enPrompt.includes("Fix login API timeout"), true);
+t("auto keeps the mixed anchor set", defaultPrompt.includes("Fix Auth Session Refresh Race"), true);
+// The terms themselves must never reach the model.
+t("exclusion directive appears only when configured", [prompt.buildSystemPrompt(promptConfig, {hasExclusions: true}).includes("removed from the message on purpose"), defaultPrompt.includes("removed from the message on purpose")], [true, false]);
+t("the terms are never sent to the model", prompt.buildSystemPrompt(promptConfig, {hasExclusions: true}).includes("客户甲"), false);
+// The retry must follow the same preferences, or the setting looks intermittent.
+t("default retry is byte-identical to the legacy text", prompt.RETRY_DIRECTIVE, "The previous attempt did not produce a usable title. Return exactly one concise task title in the language of the message: action plus object, no quotes, no Markdown, no explanation, no code.");
+t("default retry equals buildRetryDirective({})", prompt.buildRetryDirective({}), prompt.RETRY_DIRECTIVE);
+t("retry follows a pinned language", prompt.buildRetryDirective({language: "en"}).includes("in English"), true);
+t("retry follows a pinned Chinese", prompt.buildRetryDirective({language: "zh"}).includes("in Simplified Chinese"), true);
+t("retry follows the style", prompt.buildRetryDirective({style: "short-name"}).includes("compact noun phrase"), true);
+t("retry forbids restoring removed names", prompt.buildRetryDirective({hasExclusions: true}).includes("Never restore"), true);
+t("retry without exclusions omits that line", prompt.buildRetryDirective({}).includes("Never restore"), false);
+t("first input carries no directive", prompt.buildUserInput("x", false, {language: "en"}).includes("in English"), false);
+t("retry input carries the directive", prompt.buildUserInput("x", true, {language: "en"}).includes("in English"), true);
+
+// --- title lock: the settings half, and the /retitle gate
+const lockSettings = settings.resolveTitleSettings({lockedSessionIds: ["locked-1"]});
+t("a locked session is recognized", settings.isSessionTitleLocked(lockSettings, "locked-1"), true);
+t("another session is not locked", settings.isSessionTitleLocked(lockSettings, "other"), false);
+t("nothing locked -> never locked", settings.isSessionTitleLocked(settings.resolveTitleSettings({}), "locked-1"), false);
+t("an empty id is never locked", settings.isSessionTitleLocked(settings.resolveTitleSettings({lockedSessionIds: [""]}), ""), false);
+t("an empty list is never locked", settings.isSessionTitleLocked(settings.resolveTitleSettings({lockedSessionIds: []}), "x"), false);
+t("locks trim and dedupe", settings.resolveTitleSettings({lockedSessionIds: [" a ", "a", "b"]}).lockedSessionIds, ["a", "b"]);
+t("all-blank locks -> undefined", settings.resolveTitleSettings({lockedSessionIds: [" ", ""]}).lockedSessionIds, undefined);
+t("non-list locks refused", (() => { try { settings.resolveTitleSettings({lockedSessionIds: "s"}); return "no-throw"; } catch { return "throw"; } })(), "throw");
+t("over-long lock id refused", (() => { try { settings.resolveTitleSettings({lockedSessionIds: ["x".repeat(65)]}); return "no-throw"; } catch { return "throw"; } })(), "throw");
+t("over-count locks refused", (() => { try { settings.resolveTitleSettings({lockedSessionIds: Array.from({length: 501}, (_, i) => `s${i}`)}); return "no-throw"; } catch { return "throw"; } })(), "throw");
+t("500 locks accepted", settings.resolveTitleSettings({lockedSessionIds: Array.from({length: 500}, (_, i) => `s${i}`)}).lockedSessionIds.length, 500);
+t("locks stay out of row config", "lockedSessionIds" in settings.applySettingsToTitleConfig(conf.resolveTitleConfig({}), lockSettings), false);
+
+// The `/retitle` handler is the single funnel for the two deliberate paths
+// (the header button and the batch run), so the lock is enforced HERE first.
+let refreshCalls = 0;
+const fakeSessionTitle = {
+  refresh: () => { refreshCalls += 1; return Promise.resolve({ title: "T", source: { kind: "provider" } }); },
+  get: () => ({ title: "T", source: { kind: "provider" } })
+};
+const lockedTokens = tokens.createExplicitRegenerationTokens();
+const lockedOutcome = await commands.createRetitleHandler(fakeSessionTitle, lockedTokens, () => lockSettings, undefined)({
+  agent: { session: { id: "locked-1" } }, rawInput: "", signal: undefined
+});
+t("locked /retitle refuses", [lockedOutcome.kind, refreshCalls], ["error", 0]);
+// The refusal must not leave a permission behind: a granted-but-unspent token
+// would be inherited by the next automatic schedule and rewrite the locked title.
+t("locked /retitle grants no token", lockedTokens.outstanding("locked-1"), 0);
+t("locked /retitle names the lock", /locked/i.test(lockedOutcome.text), true);
+const openTokens = tokens.createExplicitRegenerationTokens();
+const openOutcome = await commands.createRetitleHandler(fakeSessionTitle, openTokens, () => settings.resolveTitleSettings({}), undefined)({
+  agent: { session: { id: "open-1" } }, rawInput: "", signal: undefined
+});
+t("unlocked /retitle still regenerates", [openOutcome.kind, refreshCalls], ["success", 1]);
+t("unlocked /retitle leaves no token behind", openTokens.outstanding("open-1"), 0);
+const disabledOutcome = await commands.createRetitleHandler(fakeSessionTitle, tokens.createExplicitRegenerationTokens(), () => settings.resolveTitleSettings({ enabled: false }), undefined)({
+  agent: { session: { id: "locked-1" } }, rawInput: "", signal: undefined
+});
+t("disabled is refused before the lock", [disabledOutcome.kind, refreshCalls], ["error", 1]);
+t("a locked session is refused by the lock, not the switch", disabledOutcome.text === lockedOutcome.text, false);
 
 // --- config validation
 t("unknown config key throws", (() => { try { conf.resolveTitleConfig({nope:1}); return "no-throw"; } catch { return "throw"; } })(), "throw");

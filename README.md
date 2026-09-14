@@ -3,7 +3,7 @@
 English | [简体中文](README.zh-CN.md)
 
 Smarter automatic session titles for **DeepSeek Harness (DSH)**.
-**0.4.0-rc.4 — release candidate**, intended for the npm `next` tag.
+**0.5.0-rc.1 — release candidate**, intended for the npm `next` tag.
 
 ## What it does
 
@@ -15,6 +15,14 @@ No separate model setup is required.
 - Waits for a meaningful task when a conversation starts with a greeting.
 - Protects manual titles and prevents automatic title drift.
 - Provides `/retitle` and a header button for explicit regeneration.
+- **Title shape and content**: a character cap, an optional date affix, a title
+  **style** (default / short task name / action + object) and a **language**
+  (auto / Chinese / English).
+- **Title exclusions**: delete customer names or internal codes from the
+  generation flow and re-check the final title — it constrains only titles this
+  plugin generates.
+- **Title lock**: a lock button beside the title; automatic generation skips it,
+  regeneration refuses, and the batch list excludes it.
 - **Optimizes titles of your stored sessions in bulk** — pick them from a list,
   watch a progress bar, and keep the run going (or stop it) after Settings is
   closed. See [Optimize past titles](#optimize-past-titles).
@@ -104,6 +112,10 @@ the exact build.
 | `maxTitleCharacters` | Unset (inherits 80 bytes) | Title **character cap** (Unicode code points); UI range 8–120 |
 | `titleDatePosition` | Unset (no date) | `prefix` / `suffix`: put the session's creation date before or after the title |
 | `titleDateFormat` | `ymd` | `ymd` (`2026-09-13`) or `md` (`09-13`); unused while no position is chosen |
+| `titleStyle` | Unset (plugin default, currently action + object) | `action-object` or `short-name` |
+| `titleLanguage` | Unset (follows the task's main language) | `zh` or `en`, forced |
+| `titleExclusions` | Unset (nothing excluded) | String list of words that must not appear in a generated title; at most 50 entries of at most 64 characters |
+| `lockedSessionIds` | Unset (nothing locked) | String list of session ids whose title no entry point may rewrite; at most 500 entries |
 
 ¹ For older deployments only, an explicit provider/model pin in the bundle row
 remains effective until the user chooses a mode. The shipped bundle has no pin.
@@ -119,9 +131,9 @@ the change is not in effect yet — until then titles keep following
 **Advanced** exposes timeout and attempts. Empty numeric fields inherit the bundle
 configuration; deployment-level compression options are in `cordis.patch.yml`.
 
-### Title shape (character cap and date)
+### Title shape and content (cap, date, style, language, exclusions)
 
-The **Title shape** block on the settings page needs no expanding:
+The **Title shape and content** block on the settings page needs no expanding:
 
 - **Maximum title characters**: empty inherits the deployment config, i.e. DSH's
   `maxTitleBytes: 80` (about 26 CJK characters or 80 Latin characters). A value
@@ -141,6 +153,102 @@ The **Title shape** block on the settings page needs no expanding:
 - The date applies only to **titles this plugin generates**: the fallback title
   used while AI titles are off, and titles you rename by hand, are written by
   DSH Core and never carry it.
+
+#### Style and language
+
+| Setting | Title for the same task ("检查登录接口并解决超时问题") |
+|---|---|
+| Default (action + object) + Auto | 修复登录接口超时 |
+| Short task name + Chinese | 登录接口超时 |
+| Action + object + English | Fix login API timeout |
+
+- **Language: Auto** (the default) follows the language primarily used by the
+  task; technology names such as React or API, and error identifiers, keep their
+  original form. Choosing **Chinese** or **English** forces a translation, and
+  keeps those names unchanged too.
+- Both settings **replace** the corresponding default rule in the system prompt
+  instead of stacking next to it: asking for a short task name does not also ask
+  for a verb plus object. The retry directive follows the same preferences, so a
+  setting can never look "intermittent" on the second attempt.
+- Automatic generation, manual regeneration and batch runs share one code path,
+  so one setting covers all three.
+- **Changing a setting never rewrites an existing title** — titles live in the
+  session log and only the next generation reads the new value.
+- Limit: the fallback title (AI off) and the previous title retained after a
+  failed generation are both unaffected by style and language.
+
+#### Title exclusions
+
+Fill one word per line under **Title exclusions** (customer names, internal
+project codes), at most 50 entries of at most 64 characters:
+
+```text
+Acme Corp
+internal-project-x
+```
+
+With the task "修复客户甲的订单导出错误", an accepted result is
+"修复订单导出错误". Two layers:
+
+1. **Before generation** the words are **deleted** from the text handed to the
+   model (the terms themselves appear in neither the prompt nor the logs), and the
+   model is told that some names were removed on purpose, to refer to them
+   generically, and never to guess or restore one.
+2. **After generation** the **exact string about to be stored** is checked again;
+   a surviving term triggers one retry with a stronger directive.
+
+If the last attempt still contains the term, the plugin **deletes the term from
+the title** rather than giving the title up — because giving it up leaves DSH's
+fallback title on the sidebar, and that fallback is the opening of the raw first
+message, i.e. precisely the path that would display the name. If deleting the
+term leaves nothing that passes validation, the generation fails outright and the
+sidebar keeps what it had.
+
+Matching is **literal**: terms containing ASCII letters ignore case (`Acme` hides
+`ACME`), everything else matches exactly. There is no stemming, alias or
+translation — add `客户甲`, `ClientA` and `甲方` separately.
+
+**It constrains only titles this plugin generates.** That boundary is deliberate:
+
+- DSH's fallback title (**what a brand-new session shows until the model
+  answers**, taken from the raw first message) is not affected;
+- titles you renamed by hand are not affected;
+- the conversation itself is never modified — what the main model receives is
+  unrelated to this setting;
+- the term list itself is stored in plain text in `settings.yaml`.
+
+So its accurate name is "title exclusions", **not a privacy or redaction
+feature**. Its most practical use is alongside **Optimize past titles**, to strip
+a name out of a whole batch of historical titles.
+
+### Title lock
+
+The **lock button** beside a session title (to the right of "Regenerate title")
+pins that title. The button shows the state itself: a closed padlock means
+locked, and the hover text and accessible label always name what a click will do
+("Lock title" / "Unlock title").
+
+All four entry points honour it:
+
+| Rule | Actual behaviour |
+|---|---|
+| Automatic generation skips locked sessions | the provider abstains (`locked`) without a model call |
+| Regeneration says why it will not run | the button is disabled and reads "Title is locked; unlock it first" |
+| The batch list excludes locked sessions | they are not listed, and the count is joined by "Locked sessions skipped: N" |
+| A batch run cannot reach them | even "Select all" cannot select a locked row |
+
+- The lock lives in the plugin's **own settings namespace** (`lockedSessionIds` in
+  `settings.yaml`), **not in browser localStorage**: it survives a new window, a
+  cleared browser profile, and a DSH restart.
+- There is no "include anyway" override — unlocking is an explicit action. That is
+  deliberate: a lock that one entry point can bypass is not a lock.
+- **Two things it cannot lock**, the same class of limit as the exclusion words:
+  ① while a session still has no title, DSH Core sets a fallback derived from the
+  first message; ② renaming a title yourself in DSH's UI is unaffected. The lock
+  protects an EXISTING title from this plugin's automatic, regenerate and batch
+  paths.
+- The honest cost: the id list lives in a config file, and a settings reset or a
+  restored settings backup drops every lock with it.
 
 ### Optimize past titles
 
@@ -225,7 +333,7 @@ first meaningful task to the explicitly selected provider, which may be differen
 
 Titles never enter model context. The plugin does not append an extra
 `session/title-llm-request` prompt copy to the session log.
-Only the nine declared Settings fields are accepted. Unknown credential-shaped
+Only the thirteen declared Settings fields are accepted. Unknown credential-shaped
 fields such as `apiKey`, token, cookie, credential, secret, and password are rejected.
 Credentials remain entirely managed by DSH.
 
@@ -312,8 +420,16 @@ Settings reject out-of-range or fractional numeric input with an explanation and
 verify persisted values after writes. Automatic fallback preserves overall batch
 counts and shows retry progress separately. Stopping it is reported as stopped;
 mode changes observed during fallback are preserved when restoring the route.
+The exclusion tests drive the real provider with a fake model stream and assert
+that a term never reaches either half of the prompt, that a surviving term is
+retried exactly once and then deleted, and that an all-excluded prompt abstains
+without a model call.
+The lock tests cover all four entry points: the provider abstains AND does not
+consume the `/retitle` permission, the command handler refuses, the header button
+disables itself with the reason, and the batch list drops locked rows so that even
+"Select all" cannot reach them.
 
-The settings page uses four collapsible cards: model, title format, advanced parameters, and batch retitling.
+The settings page uses four collapsible cards: model, title shape and content, advanced parameters, and batch retitling.
 All four sections start collapsed and show concise saved-setting summaries;
 an active batch opens its controls automatically. The layout adapts to narrow
 windows, and form fields have associated labels and visible keyboard focus.

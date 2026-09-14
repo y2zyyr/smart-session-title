@@ -44,6 +44,10 @@ export declare const PROVIDER_CADENCE = "all-prompts";
 export type AbstentionReason = "no-source-message" | "child-session" | "no-meaningful-prompt" | "already-provider-titled" | "manual-title-protected"
 /** AI titles are switched off (master switch or `disabled` mode). */
  | "disabled"
+/** The user locked this session's title, so no entry point may rewrite it. */
+ | "locked"
+/** Every meaningful word of the prompt was a configured exclusion term. */
+ | "empty-after-redaction"
 /** Mode is `configured` but no complete provider+model pair exists. */
  | "configured-incomplete"
 /** Mode is `current-session` but the session never logged a route. */
@@ -163,7 +167,7 @@ export type AttemptFailure = {
  * Used to classify the diagnostics outcome (`timeout` -> `timed-out`) without
  * matching on message text.
  */
-export type TitleFailureKind = "timeout" | "cancelled" | "model" | "protocol" | "output";
+export type TitleFailureKind = "timeout" | "cancelled" | "model" | "protocol" | "output" | "excluded";
 /** A provider failure that the service will log and swallow (fallback stays). */
 export declare class TitleGenerationError extends Error {
     readonly reason: string;

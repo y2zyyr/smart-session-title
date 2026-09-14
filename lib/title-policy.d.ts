@@ -88,7 +88,55 @@ export interface PreparedTitleInput {
     readonly omittedCodeBytes: number;
     /** True when `maxRawInputBytes` forced a head+tail window before compression. */
     readonly rawWindowed: boolean;
+    /** How many exclusion-term occurrences were deleted before sending. */
+    readonly excludedTerms: number;
 }
+/**
+ * One compiled exclusion term.
+ *
+ * Matching is literal: a term containing ASCII letters is matched
+ * case-insensitively, every other term exactly. No stemming, aliases or
+ * translation — each variant is a separate entry.
+ */
+export interface CompiledTitleExclusion {
+    readonly term: string;
+    readonly source: string;
+    readonly flags: string;
+}
+/**
+ * Compile the configured exclusion list, dropping anything unusable.
+ *
+ * @param exclusions - the raw list, possibly undefined.
+ * @returns one entry per usable term, in the user's order.
+ */
+export declare function compileTitleExclusions(exclusions: readonly string[] | undefined): readonly CompiledTitleExclusion[];
+/**
+ * The first configured term that still occurs in `text`, or undefined.
+ *
+ * Run on the exact string about to be stored, so a term cannot slip through by
+ * appearing only after shortening, and a term cut in half is not falsely hit.
+ *
+ * @param text - the candidate title (post-validation, post-truncation).
+ * @param compiled - output of {@link compileTitleExclusions}.
+ * @returns the offending term.
+ */
+export declare function findExcludedTerm(text: string, compiled: readonly CompiledTitleExclusion[]): string | undefined;
+/**
+ * Delete every configured term from `text`.
+ *
+ * Used before generation (the model never sees the term) and as the
+ * deterministic last resort when one survives into the model's output. Line
+ * structure is preserved; only the whitespace left on an affected line is
+ * repaired.
+ *
+ * @param text - the text to redact.
+ * @param compiled - output of {@link compileTitleExclusions}.
+ * @returns the redacted text and how many occurrences were removed.
+ */
+export declare function redactExcludedTerms(text: string, compiled: readonly CompiledTitleExclusion[]): {
+    readonly text: string;
+    readonly removed: number;
+};
 /**
  * Keep the parts of a long task specification that actually name the task:
  * the opening lines, every section heading with its lead sentence, and the
@@ -98,11 +146,16 @@ export declare function extractSalientRegions(input: string): string;
 /**
  * Compress one first prompt into a title-model input that fits the budget.
  *
- * Order of operations: window the raw text if it is absurdly large, drop large
- * code blocks, then fall back to structural extraction, then to head+tail.
- * The function never rejects an input on size alone.
+ * Order of operations: redact the exclusion terms, window the raw text if it is
+ * absurdly large, drop large code blocks, then fall back to structural
+ * extraction, then to head+tail. The function never rejects an input on size
+ * alone, and redaction runs first so nothing downstream can reintroduce a term.
+ *
+ * @param input - the raw human message.
+ * @param config - resolved composition config.
+ * @param exclusions - the raw `titleExclusions` setting (undefined = none).
  */
-export declare function prepareTitleInput(input: string, config: Pick<TitleConfig, "maxRawInputBytes" | "targetPreparedInputBytes" | "codeBlockKeepBytes">): PreparedTitleInput;
+export declare function prepareTitleInput(input: string, config: Pick<TitleConfig, "maxRawInputBytes" | "targetPreparedInputBytes" | "codeBlockKeepBytes">, exclusions?: readonly string[] | undefined): PreparedTitleInput;
 /** One eligible human message as the service hands it to a provider. */
 export interface HumanMessage {
     readonly seq: number;

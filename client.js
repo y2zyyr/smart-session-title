@@ -50,7 +50,7 @@ window.__ModuleLoader__.load({
      * The two are kept in sync deliberately: `validation/verify-i18n.mjs`
      * fails when this string and package.json's `version` drift apart.
      */
-    var PLUGIN_VERSION = "0.4.0-rc.4";
+    var PLUGIN_VERSION = "0.5.0-rc.1";
 
     /**
      * Where the batch block remembers its automatic-fallback checkbox. It is a
@@ -93,6 +93,11 @@ window.__ModuleLoader__.load({
       "action.disabled": "AI 标题已关闭",
       "action.unavailable": "重新生成标题：命令不可用",
       "action.failed": "重新生成标题失败",
+      // Title lock, beside the title in the conversation header ----------
+      "action.locked": "标题已锁定，请先解锁",
+      "lock.lock": "锁定标题",
+      "lock.unlock": "解锁标题",
+      "lock.failed": "锁定状态保存失败",
       // Settings nav label -----------------------------------------
       "nav": "智能会话标题",
       // Settings page ----------------------------------------------
@@ -130,8 +135,17 @@ window.__ModuleLoader__.load({
       "settings.maxAttempts": "最大尝试次数",
       "settings.advancedHint": "留空使用默认配置，下次生成时生效。",
       "settings.version": "版本",
-      // Title shape: length cap + optional date affix -----------------
-      "settings.shapeLegend": "标题格式",
+      // Title shape + content: cap, date affix, style, language, exclusions ----
+      "settings.shapeLegend": "标题格式与内容",
+      "settings.style": "风格",
+      "settings.styleDefault": "默认",
+      "settings.styleShortName": "简短任务名",
+      "settings.styleActionObject": "动作＋对象",
+      "settings.language": "语言",
+      "settings.languageAuto": "自动",
+      "settings.languageZh": "中文",
+      "settings.languageEn": "英文",
+      "settings.contentHint": "「自动」跟随任务内容的主要语言；技术名称（React、API 等）保持原样。风格与语言适用于自动生成、手动重新生成和批量处理；改动不会重写已有标题。",
       "settings.maxCharacters": "标题最大字数",
       "settings.dateAffix": "日期位置",
       "settings.dateAffixOff": "不添加",
@@ -141,6 +155,12 @@ window.__ModuleLoader__.load({
       "settings.dateFormatYmd": "2026-09-13",
       "settings.dateFormatMd": "09-13",
       "settings.shapeHint": "字数上限留空表示继承部署配置（80 字节，约 26 个汉字或 80 个西文字符）。日期取会话创建时间（本地时区），重新生成标题不会改变它；选择后缀时，字数会先为日期留出空间，确保日期不被截掉。",
+      "settings.exclusions": "标题排除词",
+      "settings.exclusionsPlaceholder": "每行一个，例如：\n客户甲\n内部项目代号",
+      "settings.exclusionsSummary": "排除词",
+      "settings.exclusionsHint": "这些词会在生成前从提示文本中删除，生成后再检查一次；标题里仍出现时先重试一次，最后一次直接删掉该词，而不是放弃这个标题。按字面匹配，含英文字母时忽略大小写；别名、缩写、译名需分别添加。",
+      "settings.invalidExclusions": "每个排除词一行、不超过 64 个字符，最多 50 个。",
+      "settings.exclusionsBoundary": "只约束本插件生成的标题：DSH 的兜底标题（新会话在模型回答前显示的就是它）、你手动改过的标题和对话原文都不受此设置影响。",
       // Batch: optimize past titles ---------------------------------
       "batch.legend": "批量优化历史标题",
       "batch.intro": "仅处理选中的会话，也会覆盖人工修改的标题。",
@@ -163,7 +183,8 @@ window.__ModuleLoader__.load({
       "batch.loading": "正在加载历史会话…",
       "batch.loadFailed": "无法读取历史会话列表。",
       "batch.unavailable": "当前浏览器无法读取历史会话。",
-      "batch.empty": "没有可处理的历史会话（无用户消息或子代理会话会被跳过）。",
+      "batch.empty": "没有可处理的历史会话（无用户消息、子代理会话或已锁定会话会被跳过）。",
+      "batch.skippedLocked": "已跳过已锁定会话",
       "batch.count": "可处理会话",
       "batch.cwd": "项目目录",
       "batch.allCwd": "全部项目",
@@ -201,6 +222,11 @@ window.__ModuleLoader__.load({
       "action.disabled": "AI title generation is disabled",
       "action.unavailable": "Regenerate title: command unavailable",
       "action.failed": "Regenerate title failed",
+      // Title lock, beside the title in the conversation header ----------
+      "action.locked": "Title is locked; unlock it first",
+      "lock.lock": "Lock title",
+      "lock.unlock": "Unlock title",
+      "lock.failed": "Could not save the lock state",
       // Settings nav label -----------------------------------------
       "nav": "Smart Session Title",
       // Settings page ----------------------------------------------
@@ -238,8 +264,17 @@ window.__ModuleLoader__.load({
       "settings.maxAttempts": "Max attempts",
       "settings.advancedHint": "Leave empty to inherit defaults. Applies to the next generation.",
       "settings.version": "Version",
-      // Title shape: length cap + optional date affix -----------------
-      "settings.shapeLegend": "Title shape",
+      // Title shape + content: cap, date affix, style, language, exclusions ----
+      "settings.shapeLegend": "Title shape and content",
+      "settings.style": "Style",
+      "settings.styleDefault": "Default",
+      "settings.styleShortName": "Short task name",
+      "settings.styleActionObject": "Action + object",
+      "settings.language": "Language",
+      "settings.languageAuto": "Auto",
+      "settings.languageZh": "Chinese",
+      "settings.languageEn": "English",
+      "settings.contentHint": "\"Auto\" follows the language primarily used by the task; technology names (React, API, …) stay as they are. Style and language apply to automatic, manual and batch generation, and changing them never rewrites an existing title.",
       "settings.maxCharacters": "Maximum title characters",
       "settings.dateAffix": "Date position",
       "settings.dateAffixOff": "None",
@@ -249,6 +284,12 @@ window.__ModuleLoader__.load({
       "settings.dateFormatYmd": "2026-09-13",
       "settings.dateFormatMd": "09-13",
       "settings.shapeHint": "An empty character limit inherits the deployment config (80 bytes: about 26 CJK characters or 80 Latin characters). The date is the session's creation time in local time and does not move when a title is regenerated; a suffix date reserves its own space inside the limit so it is never cut off.",
+      "settings.exclusions": "Title exclusions",
+      "settings.exclusionsPlaceholder": "One per line, for example:\nAcme Corp\ninternal-project-x",
+      "settings.exclusionsSummary": "Exclusions",
+      "settings.exclusionsHint": "These words are deleted from the prompt text before generation and checked again afterwards: a surviving term is retried once, then deleted from the title on the last attempt rather than giving the title up. Matching is literal, and case-insensitive when the term contains ASCII letters; aliases, abbreviations and translations must be added separately.",
+      "settings.invalidExclusions": "Each exclusion takes one line of at most 64 characters, with at most 50 entries.",
+      "settings.exclusionsBoundary": "This constrains only titles this plugin generates. DSH's fallback title (what a brand-new session shows until the model answers), titles you renamed yourself, and the conversation itself are unaffected.",
       // Batch: optimize past titles ---------------------------------
       "batch.legend": "Optimize past titles",
       "batch.intro": "Only selected sessions are changed, including manually renamed titles.",
@@ -271,7 +312,8 @@ window.__ModuleLoader__.load({
       "batch.loading": "Loading past sessions…",
       "batch.loadFailed": "Could not read the past-session list.",
       "batch.unavailable": "Past sessions are not readable in this browser.",
-      "batch.empty": "No past sessions to optimize (sessions without a user message and subagent sessions are skipped).",
+      "batch.empty": "No past sessions to optimize (sessions without a user message, subagent sessions and locked sessions are skipped).",
+      "batch.skippedLocked": "Locked sessions skipped",
       "batch.count": "Sessions available",
       "batch.cwd": "Project",
       "batch.allCwd": "All projects",
@@ -527,6 +569,25 @@ window.__ModuleLoader__.load({
 `;
 
     var settingsWrites = new WeakMap();
+    /**
+     * Value equality for the post-write check below.
+     *
+     * `===` is not enough once a setting is a LIST: the host resolves a fresh,
+     * frozen array on every snapshot, so an identity comparison would report a
+     * perfectly successful write as "not applied" and show a save error. Arrays
+     * are compared element-wise; everything else keeps the strict identity check
+     * that detects a silently ignored write.
+     */
+    function sameSettingValue(left, right) {
+      if (left === right) return true;
+      if (Array.isArray(left) && Array.isArray(right)) {
+        return left.length === right.length && left.every(function (item, index) {
+          return item === right[index];
+        });
+      }
+      return false;
+    }
+
     function persistSettings(scope, ops, expectedRevision) {
       var previous = settingsWrites.get(scope) || Promise.resolve();
       var task = previous.catch(function () {}).then(function () {
@@ -537,11 +598,69 @@ window.__ModuleLoader__.load({
           var key = op.path[0];
           return op.op === "unset"
             ? !Object.prototype.hasOwnProperty.call(snap.user || {}, key)
-            : (snap.value || {})[key] === op.value && (snap.user || {})[key] === op.value;
+            : sameSettingValue((snap.value || {})[key], op.value) && sameSettingValue((snap.user || {})[key], op.value);
         })) throw new Error("settings write was not applied");
       });
       settingsWrites.set(scope, task);
       return task;
+    }
+
+    /**
+     * Locked session ids recorded in one settings snapshot.
+     *
+     * Read from the RAW user section, which is what the user actually chose: the
+     * resolved value materializes an absent list as `[]`, so it cannot tell "never
+     * locked anything" from "explicitly emptied". Both are "nothing locked" here,
+     * which is why either source would do — the raw section is simply the one that
+     * survives a round trip unchanged.
+     */
+    function lockedIdsOf(snapshot) {
+      var user = snapshot !== null && snapshot !== undefined ? snapshot.user : undefined;
+      var ids = user !== null && user !== undefined ? user.lockedSessionIds : undefined;
+      return Array.isArray(ids) ? ids : [];
+    }
+
+    /** Whether one session's title is locked in the given snapshot. */
+    function isLockedIn(snapshot, sessionId) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return false;
+      return lockedIdsOf(snapshot).indexOf(sessionId) !== -1;
+    }
+
+    /**
+     * Flip one session's lock through the public settings scope.
+     *
+     * The lock lives in the plugin's own settings namespace on the host, NOT in
+     * browser storage: a lock therefore survives a new window, a cleared browser
+     * profile, and a DSH restart. The list is read back from the CURRENT snapshot
+     * at click time and the write is fenced by that snapshot's revision, so a
+     * concurrent change (another window locking a different session) fails the
+     * write loudly instead of being silently clobbered by this read-modify-write.
+     *
+     * @param scope - the bound settings scope controller.
+     * @param sessionId - the session whose lock to flip.
+     * @returns a promise settling when the write landed (or was refused).
+     */
+    function toggleSessionLock(scope, sessionId) {
+      if (scope === undefined || typeof sessionId !== "string" || sessionId.length === 0) {
+        return Promise.resolve();
+      }
+      var snapshot = scope.getSnapshot();
+      if (snapshot === null || snapshot === undefined || snapshot.status !== "ready") {
+        return Promise.resolve();
+      }
+      var current = lockedIdsOf(snapshot);
+      var next = current.indexOf(sessionId) === -1
+        ? current.concat([sessionId])
+        : current.filter(function (id) { return id !== sessionId; });
+      // An empty list is an unset, so an absent key keeps meaning "nothing locked"
+      // and settings.yaml never accumulates an empty array.
+      return persistSettings(
+        scope,
+        next.length === 0
+          ? [{ op: "unset", path: ["lockedSessionIds"] }]
+          : [{ op: "set", path: ["lockedSessionIds"], value: next }],
+        snapshot.revision
+      );
     }
 
     /** Reset value of the batch runner's snapshot. */
@@ -1016,10 +1135,17 @@ window.__ModuleLoader__.load({
       );
 
       var aiDisabled = isAiDisabledSnapshot(settingsSnapshot);
-      var busy = state === "loading" || aiDisabled;
-      var label = aiDisabled
-        ? t("action.disabled")
-        : t(state === "loading" ? "action.regenerating" : "action.regenerate");
+      // A locked title is refused BEFORE the command is issued. The host refuses it
+      // too (that half is what makes the guarantee hold for a stale client), but it
+      // can only answer with a generic failure the user cannot act on — so the
+      // button itself carries the reason instead.
+      var locked = isLockedIn(settingsSnapshot, sessionId);
+      var busy = state === "loading" || aiDisabled || locked;
+      var label = locked
+        ? t("action.locked")
+        : aiDisabled
+          ? t("action.disabled")
+          : t(state === "loading" ? "action.regenerating" : "action.regenerate");
 
       var onClick = react.useCallback(
         function () {
@@ -1072,6 +1198,154 @@ window.__ModuleLoader__.load({
           setHovered(false);
         },
         children: jsxRuntime.jsx(primitives.IconRefreshOutline16, {})
+      });
+    }
+
+    /**
+     * The lock glyph: a 16px outline padlock whose shackle opens when unlocked.
+     *
+     * Drawn here rather than taken from the shipped primitives because the DSH
+     * bundle exports no lock or pin icon (checked in `app.asar`: the primitives
+     * package has no `IconLock*`/`IconPin*` name at all). An inline SVG keeps the
+     * affordance dependency-free and, unlike a text or emoji glyph, adds no
+     * user-visible string that would have to live in the dictionary.
+     *
+     * @param locked - whether the closed shackle should be drawn.
+     */
+    function lockGlyph(locked) {
+      return jsxRuntime.jsxs("svg", {
+        width: 16,
+        height: 16,
+        viewBox: "0 0 16 16",
+        fill: "none",
+        stroke: "currentColor",
+        strokeWidth: 1.4,
+        strokeLinecap: "round",
+        strokeLinejoin: "round",
+        "aria-hidden": "true",
+        children: [
+          jsxRuntime.jsx("rect", { key: "body", x: 3.5, y: 7, width: 9, height: 6.5, rx: 1.4 }),
+          jsxRuntime.jsx("path", {
+            key: "shackle",
+            d: locked
+              ? "M5.8 7V5.2a2.2 2.2 0 0 1 4.4 0V7"
+              : "M5.8 7V5.2a2.2 2.2 0 0 1 4.4 0"
+          })
+        ]
+      });
+    }
+
+    /**
+     * Header lock toggle for one session's title.
+     *
+     * The lock is the user's explicit "no entry point may rewrite this title". It
+     * matters for the two DELIBERATE paths that are allowed to override a
+     * hand-written title — the regenerate button beside it and the batch run —
+     * which is exactly why it cannot live in this window's storage: the whole
+     * point is that a lock set here also holds in another window, after a browser
+     * profile reset, and after a DSH restart. It therefore goes through the same
+     * settings scope the settings page uses (documented trade-off: the id list
+     * lives in `settings.yaml`, and a settings reset drops it).
+     *
+     * The button shows the state itself: a closed padlock means locked, and the
+     * label always names the action the click would perform.
+     */
+    function LockTitleAction(props) {
+      var t = translatorOf(props);
+      var scope = props.scope;
+      var sessionId = props.sessionId;
+
+      var snapshotPair = react.useState(function () {
+        return scope === undefined ? undefined : scope.getSnapshot();
+      });
+      var snapshot = snapshotPair[0];
+      var setSnapshot = snapshotPair[1];
+      var hoverPair = react.useState(false);
+      var hovered = hoverPair[0];
+      var setHovered = hoverPair[1];
+      // A refused write (a concurrent change in another window, or a full list)
+      // must be visible: report it on the button instead of failing silently.
+      var failedPair = react.useState(false);
+      var failed = failedPair[0];
+      var setFailed = failedPair[1];
+      var pendingPair = react.useState(false);
+      var pending = pendingPair[0];
+      var setPending = pendingPair[1];
+
+      var mounted = react.useRef(true);
+      react.useEffect(function () {
+        return function () {
+          mounted.current = false;
+        };
+      }, []);
+
+      react.useEffect(
+        function () {
+          if (scope === undefined) return undefined;
+          return scope.subscribe(function () {
+            if (mounted.current) setSnapshot(scope.getSnapshot());
+          });
+        },
+        [scope]
+      );
+
+      var locked = isLockedIn(snapshot, sessionId);
+      var label = failed
+        ? t("lock.failed")
+        : locked
+          ? t("lock.unlock")
+          : t("lock.lock");
+      var busy = scope === undefined || pending;
+
+      // Shares the shipped header affordance's metrics with the regenerate button
+      // beside it — 28px round, transparent, tertiary label colour, hover wash.
+      var style = {
+        width: 28,
+        height: 28,
+        padding: 0,
+        border: "none",
+        borderRadius: 999,
+        display: "grid",
+        placeItems: "center",
+        flex: "none",
+        background: hovered && !busy ? "var(--dsw-alias-interactive-bg-hover)" : "transparent",
+        // A locked title is a state the user must be able to see at a glance, so
+        // the glyph carries the primary colour instead of the tertiary wash.
+        color: locked ? "var(--dsw-alias-label-primary)" : "var(--dsw-alias-label-tertiary)",
+        cursor: busy ? "default" : "pointer",
+        opacity: busy ? 0.45 : 1
+      };
+
+      return jsxRuntime.jsx("button", {
+        type: "button",
+        style: style,
+        disabled: busy,
+        "aria-pressed": locked ? "true" : "false",
+        "aria-label": label,
+        title: label,
+        onClick: function () {
+          setFailed(false);
+          setPending(true);
+          Promise.resolve(toggleSessionLock(scope, sessionId)).then(
+            function () {
+              if (!mounted.current) return;
+              setPending(false);
+              setSnapshot(scope.getSnapshot());
+            },
+            function () {
+              if (!mounted.current) return;
+              setPending(false);
+              setFailed(true);
+            }
+          );
+        },
+        onMouseEnter: function () {
+          setHovered(true);
+        },
+        onMouseLeave: function () {
+          setHovered(false);
+        },
+        children: lockGlyph(locked)
       });
     }
 
@@ -1270,12 +1544,39 @@ window.__ModuleLoader__.load({
                 regenerate: function () {
                   return controller.run(sessionId);
                 },
+                // Passed through the face rather than read off the slot: the lock
+                // decision needs the id, and this is the argument that is guaranteed
+                // to be present (the `regenerate` closure already depends on it).
+                sessionId: sessionId,
                 // Lets the button follow the AI on/off setting without a reload.
                 scope: settingsScope
               };
             }
           },
           RegenerateTitleAction
+        );
+      });
+
+      // The lock toggle sits immediately after the regenerate button (order 31) so
+      // the two decisions read together: "regenerate" and "never regenerate this
+      // one". Same slot, same locale seat, same settings scope — the lock needs no
+      // Remote of its own.
+      ctx.slots.inject("conversation.session.header.actions", function () {
+        return ctx.slots.register(
+          {
+            name: "conversation.session.header.actions",
+            id: "smart-session-title-lock",
+            order: 31,
+            label: "Lock title",
+            locale: NS,
+            inject: function (sessionId) {
+              return {
+                sessionId: sessionId,
+                scope: settingsScope
+              };
+            }
+          },
+          LockTitleAction
         );
       });
     }
@@ -1291,6 +1592,10 @@ window.__ModuleLoader__.load({
     exports.createRegenerationController = createRegenerationController;
     exports.interpretOutcome = interpretOutcome;
     exports.RegenerateTitleAction = RegenerateTitleAction;
+    exports.LockTitleAction = LockTitleAction;
+    exports.lockedIdsOf = lockedIdsOf;
+    exports.toggleSessionLock = toggleSessionLock;
+    exports.isLockedIn = isLockedIn;
     exports.isAiDisabledSnapshot = isAiDisabledSnapshot;
     /**
      * Settings section component — the `settings.section` page.
@@ -1322,6 +1627,13 @@ window.__ModuleLoader__.load({
       var draftPair = react.useState({});
       var draft = draftPair[0];
       var setDraft = draftPair[1];
+      // The exclusion list is edited as raw multi-line text. The draft keeps the
+      // textarea showing exactly what was typed: the host trims, drops blank lines
+      // and dedupes, and re-rendering that normalized list under the cursor would
+      // fight the typist (a trailing newline would vanish mid-keystroke).
+      var exclusionDraftPair = react.useState(undefined);
+      var exclusionDraft = exclusionDraftPair[0];
+      var setExclusionDraft = exclusionDraftPair[1];
       var errorPair = react.useState("");
       var error = errorPair[0];
       var setError = errorPair[1];
@@ -1403,6 +1715,11 @@ window.__ModuleLoader__.load({
       var value = snap.value || {};
       var user = snap.user || {};
       var busy = !snap.writable;
+      // The exclusion list as persisted, used both by the textarea's initial text
+      // and by the collapsed summary.
+      var savedExclusions = Array.isArray(user.titleExclusions) ? user.titleExclusions : [];
+      // Locked session ids as persisted; the batch list excludes them.
+      var savedLockedIds = Array.isArray(user.lockedSessionIds) ? user.lockedSessionIds : [];
 
       // The resolved value carries the composition base; the raw user section
       // tells us what the human actually chose. `mode === undefined` means they
@@ -1441,6 +1758,41 @@ window.__ModuleLoader__.load({
           raw = parsed;
         }
         return save([raw === "" ? { op: "unset", path: [field] } : { op: "set", path: [field], value: raw }]);
+      }
+
+      /**
+       * Persist the exclusion textarea.
+       *
+       * The textarea holds a raw multi-line string while the host stores a
+       * normalized list, so the same normalization (trim, drop blanks, dedupe) is
+       * applied here: the write stays idempotent, and an emptied box becomes an
+       * `unset` instead of an empty array the host would have to special-case.
+       *
+       * The bounds mirror the host's own limits. Checking them here is what turns a
+       * too-long line into a named message instead of the generic "settings could
+       * not be saved" the rejected write would otherwise produce.
+       */
+      var EXCLUSION_LIMITS = { maxTerms: 50, maxCharacters: 64 };
+      function writeExclusions(text) {
+        var terms = [];
+        var seen = {};
+        var lines = String(text).split("\n");
+        for (var index = 0; index < lines.length; index += 1) {
+          var trimmed = lines[index].trim();
+          if (trimmed === "" || seen[trimmed] === true) continue;
+          if (Array.from(trimmed).length > EXCLUSION_LIMITS.maxCharacters) {
+            setError(t("settings.invalidExclusions"));
+            return undefined;
+          }
+          seen[trimmed] = true;
+          terms.push(trimmed);
+        }
+        if (terms.length > EXCLUSION_LIMITS.maxTerms) {
+          setError(t("settings.invalidExclusions"));
+          return undefined;
+        }
+        if (terms.length === 0) return save([{ op: "unset", path: ["titleExclusions"] }]);
+        return save([{ op: "set", path: ["titleExclusions"], value: terms }]);
       }
 
       var children = [];
@@ -1721,11 +2073,13 @@ window.__ModuleLoader__.load({
 
       var shapeIndex = children.length;
 
-      // Title shape: the code-point cap and the optional date affix. Both are
-      // read by the host half on the next generation, so there is nothing to
-      // save explicitly — the same immediate-write contract as the fields above.
+      // Title shape and content: the code-point cap, the optional date affix, the
+      // phrasing/language preferences, and the exclusion words. All of them are
+      // read by the host half on the NEXT generation, so there is nothing to save
+      // explicitly — the same immediate-write contract as the fields above.
       // The date itself comes from the session's creation time, which is why
       // this block offers no date picker: there is nothing for the user to pick.
+      var exclusionsText = exclusionDraft !== undefined ? exclusionDraft : savedExclusions.join("\n");
       children.push(
         react.createElement(
           "fieldset",
@@ -1734,6 +2088,49 @@ window.__ModuleLoader__.load({
             "legend",
             { style: { fontWeight: 500, marginBottom: 4, padding: 0, fontSize: 13 } },
             t("settings.shapeLegend")
+          ),
+          // Phrasing and language. Both are enums whose empty option is the unset
+          // that follows the plugin default / the message's own language, so the UI
+          // never needs a sentinel the host would have to know about.
+          react.createElement(
+            "div",
+            { style: { marginBottom: 6 } },
+            react.createElement("label", { style: labelStyle, htmlFor: "sst-titleStyle" }, t("settings.style")),
+            react.createElement(
+              "select",
+              {
+                id: "sst-titleStyle",
+                value: typeof user.titleStyle === "string" ? user.titleStyle : "",
+                disabled: busy,
+                style: Object.assign({ width: 180 }, fieldStyle),
+                onChange: function (event) {
+                  writeField("titleStyle", event.target.value);
+                }
+              },
+              react.createElement("option", { value: "" }, t("settings.styleDefault")),
+              react.createElement("option", { value: "short-name" }, t("settings.styleShortName")),
+              react.createElement("option", { value: "action-object" }, t("settings.styleActionObject"))
+            )
+          ),
+          react.createElement(
+            "div",
+            { style: { marginBottom: 6 } },
+            react.createElement("label", { style: labelStyle, htmlFor: "sst-titleLanguage" }, t("settings.language")),
+            react.createElement(
+              "select",
+              {
+                id: "sst-titleLanguage",
+                value: typeof user.titleLanguage === "string" ? user.titleLanguage : "",
+                disabled: busy,
+                style: Object.assign({ width: 180 }, fieldStyle),
+                onChange: function (event) {
+                  writeField("titleLanguage", event.target.value);
+                }
+              },
+              react.createElement("option", { value: "" }, t("settings.languageAuto")),
+              react.createElement("option", { value: "zh" }, t("settings.languageZh")),
+              react.createElement("option", { value: "en" }, t("settings.languageEn"))
+            )
           ),
           react.createElement(
             "div",
@@ -1794,10 +2191,30 @@ window.__ModuleLoader__.load({
               react.createElement("option", { value: "md" }, t("settings.dateFormatMd"))
             )
           ),
+          react.createElement(
+            "div",
+            { style: { marginBottom: 6 } },
+            react.createElement("label", { style: labelStyle, htmlFor: "sst-titleExclusions" }, t("settings.exclusions")),
+            react.createElement("textarea", {
+              id: "sst-titleExclusions",
+              rows: 4,
+              value: exclusionsText,
+              disabled: busy,
+              placeholder: t("settings.exclusionsPlaceholder"),
+              style: Object.assign({ width: "100%", maxWidth: 320, resize: "vertical" }, fieldStyle),
+              onChange: function (event) {
+                setExclusionDraft(event.target.value);
+                writeExclusions(event.target.value);
+              }
+            }),
+            react.createElement("p", { style: hintStyle }, t("settings.exclusionsHint"))
+          ),
+          react.createElement("p", { className: "sst-shape-summary", style: hintStyle }, t("settings.contentHint")),
           react.createElement("p", { className: "sst-shape-summary", style: hintStyle }, t("settings.shapeSummary")),
           react.createElement("details", { className: "sst-format-help" },
             react.createElement("summary", {}, t("settings.formatHelp")),
-            react.createElement("p", { style: Object.assign({}, hintStyle, { marginTop: 8 }) }, t("settings.shapeHint")))
+            react.createElement("p", { style: Object.assign({}, hintStyle, { marginTop: 8 }) }, t("settings.shapeHint")),
+            react.createElement("p", { style: Object.assign({}, hintStyle, { marginTop: 8 }) }, t("settings.exclusionsBoundary")))
         )
       );
 
@@ -1867,7 +2284,11 @@ window.__ModuleLoader__.load({
           },
           // Provider directory: lets the list flag sessions whose logged model is
           // gone before the run instead of after it fails.
-          catalog: catalog
+          catalog: catalog,
+          // Locked sessions are excluded from the batch. Read from the raw user
+          // section so a lock toggled in the header while this page is open is
+          // reflected on the next render.
+          lockedSessionIds: savedLockedIds
         })
       );
 
@@ -1878,10 +2299,21 @@ window.__ModuleLoader__.load({
       var modelSummary = !enabled || value.mode === "disabled" ? t("settings.modeDisabled")
         : value.mode === "configured" ? (value.provider || "—") + " / " + (value.model || "—")
         : t("settings.modeCurrent");
-      var shapeSummary = (typeof value.maxTitleCharacters === "number"
+      // Phrasing and language come from the RAW user section (what the human
+      // actually chose) so the summary never claims a preference the user did not
+      // set: an absent value means "default" / "auto".
+      var styleSummary = user.titleStyle === "short-name" ? t("settings.styleShortName")
+        : user.titleStyle === "action-object" ? t("settings.styleActionObject")
+        : t("settings.styleDefault");
+      var languageSummary = user.titleLanguage === "zh" ? t("settings.languageZh")
+        : user.titleLanguage === "en" ? t("settings.languageEn")
+        : t("settings.languageAuto");
+      var shapeSummary = styleSummary + " · " + languageSummary + " · " +
+        (typeof value.maxTitleCharacters === "number"
         ? String(value.maxTitleCharacters) + " " + t("settings.characterUnit") : t("settings.defaultLength")) + " · " +
         (value.titleDatePosition === "prefix" ? t("settings.dateAffixPrefix")
-          : value.titleDatePosition === "suffix" ? t("settings.dateAffixSuffix") : t("settings.dateAffixOff"));
+          : value.titleDatePosition === "suffix" ? t("settings.dateAffixSuffix") : t("settings.dateAffixOff")) +
+        (savedExclusions.length > 0 ? " · " + t("settings.exclusionsSummary") + " " + savedExclusions.length : "");
       var advancedSummary = [
         typeof value.timeoutMs === "number" ? t("settings.timeout") + " " + value.timeoutMs : "",
         typeof value.maxAttempts === "number" ? t("settings.maxAttempts") + " " + value.maxAttempts : ""
@@ -2167,7 +2599,25 @@ window.__ModuleLoader__.load({
         cursor: "pointer"
       };
       var running = snap.status === "running";
-      var list = Array.isArray(rows) ? rows : [];
+      // Locked sessions are excluded from the batch, per the lock's whole purpose:
+      // a batch run is one of the two deliberate paths allowed to overwrite a
+      // hand-written title, so a lock that did not cover it would be a lock in name
+      // only. They are excluded HERE (from the loaded candidates) rather than at
+      // load time, so locking a session in the header takes effect on the next
+      // render without reloading the list. There is no "include anyway" override by
+      // design — unlock the session first, which is an explicit action.
+      var lockedIds = Array.isArray(props.lockedSessionIds) ? props.lockedSessionIds : [];
+      var allRows = Array.isArray(rows) ? rows : [];
+      var list = [];
+      var lockedSkipped = 0;
+      for (var lockedIndex = 0; lockedIndex < allRows.length; lockedIndex += 1) {
+        var candidateId = allRows[lockedIndex].sessionId;
+        if (typeof candidateId === "string" && lockedIds.indexOf(candidateId) !== -1) {
+          lockedSkipped += 1;
+          continue;
+        }
+        list.push(allRows[lockedIndex]);
+      }
       var cwds = [];
       for (var index = 0; index < list.length; index += 1) {
         var cwd = typeof list[index].cwd === "string" ? list[index].cwd : "";
@@ -2281,8 +2731,17 @@ window.__ModuleLoader__.load({
           list.length > 0
             ? react.createElement(
                 "span",
-                { style: HINT_STYLE },
+                { key: "count", style: HINT_STYLE },
                 t("batch.count") + ": " + String(list.length)
+              )
+            : null,
+          // Say how many the lock removed, so a smaller list is explained rather
+          // than looking like the lock silently did nothing.
+          lockedSkipped > 0
+            ? react.createElement(
+                "span",
+                { key: "locked-skipped", style: HINT_STYLE },
+                t("batch.skippedLocked") + ": " + String(lockedSkipped)
               )
             : null
         )

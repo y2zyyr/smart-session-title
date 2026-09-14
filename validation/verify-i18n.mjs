@@ -63,6 +63,18 @@ window.__ModuleLoader__ = {
 };
 
 // ---- fake React ----------------------------------------------------------
+/**
+ * Hook state is kept per COMPONENT FUNCTION, the way React keeps it per fiber.
+ *
+ * One shared array is not faithful: this fake never runs effect cleanups, so a
+ * component's subscription stays live after the test moves on, and its `setState`
+ * would then write into whatever component mounts NEXT at the same hook index.
+ * That produced state no real React can produce — an earlier component's settings
+ * snapshot turning up in a later component's unrelated state slot — so components
+ * are isolated here instead.
+ */
+const componentState = new Map();
+const componentRefs = new Map();
 let state = [];
 // Refs, like state, must survive re-renders (real React keeps them by hook
 // order) — otherwise a component that guards on a previous value can never see
@@ -74,11 +86,17 @@ let pendingEffects = [];
 const fakeReact = {
   useState(init) {
     const i = cursor++;
-    if (state[i] === undefined) {
-      state[i] = typeof init === "function" ? init() : init;
+    // Capture THIS render's slot array, not the module-level binding: the binding
+    // is re-pointed by every `renderPass`, so a setter that read it later would
+    // write into whichever component happens to be rendering — or, for a stale
+    // subscription (this fake never runs effect cleanups), into a LATER component's
+    // same-numbered slot. A real React setter is bound to its own fiber.
+    const slot = state;
+    if (slot[i] === undefined) {
+      slot[i] = typeof init === "function" ? init() : init;
     }
-    return [state[i], (v) => {
-      state[i] = typeof v === "function" ? v(state[i]) : v;
+    return [slot[i], (v) => {
+      slot[i] = typeof v === "function" ? v(slot[i]) : v;
     }];
   },
   useEffect(fn) {
@@ -86,8 +104,9 @@ const fakeReact = {
   },
   useRef(init) {
     const i = cursor++;
-    if (refs[i] === undefined) refs[i] = { current: init };
-    return refs[i];
+    const slot = refs;
+    if (slot[i] === undefined) slot[i] = { current: init };
+    return slot[i];
   },
   useCallback(fn) {
     return fn;
@@ -112,10 +131,14 @@ const fakeJsxRuntime = {
 const fakePrimitives = {};
 
 // ---- render helpers ------------------------------------------------------
-/** One synchronous render pass: hooks read from `state`, effects are queued. */
+/** One synchronous render pass: hooks read from this component's own state. */
 function renderPass(component, props) {
   cursor = 0;
   pendingEffects = [];
+  if (!componentState.has(component)) componentState.set(component, []);
+  if (!componentRefs.has(component)) componentRefs.set(component, []);
+  state = componentState.get(component);
+  refs = componentRefs.get(component);
   return component(props);
 }
 
@@ -123,10 +146,15 @@ function renderPass(component, props) {
  * Render a component and let its effects settle: run every queued effect,
  * await any promise it starts, and re-render while state actually changed.
  * Models the "mount → effect → setState → re-render" cycle of a real React.
+ *
+ * A fresh mount starts from EMPTY hook state for that component only; another
+ * component's state is untouched (see `componentState`).
  */
 async function settle(component, props) {
   state = [];
   refs = [];
+  componentState.set(component, state);
+  componentRefs.set(component, refs);
   const tree = renderPass(component, props);
   return flush(component, props, tree);
 }
@@ -390,11 +418,16 @@ const fakeCtx = {
               fakeScopeSnapshot = { ...fakeScopeSnapshot, value, user };
               continue;
             }
-            scopeSets.push([field, op.value]);
+            // The real host re-resolves the section, so the value the component
+            // reads back is a FRESH array, never the one it wrote. Copying here
+            // keeps the write check honest: an identity comparison would fail a
+            // list write that actually succeeded.
+            const stored = Array.isArray(op.value) ? op.value.slice() : op.value;
+            scopeSets.push([field, stored]);
             fakeScopeSnapshot = {
               ...fakeScopeSnapshot,
-              value: { ...fakeScopeSnapshot.value, [field]: op.value },
-              user: { ...fakeScopeSnapshot.user, [field]: op.value }
+              value: { ...fakeScopeSnapshot.value, [field]: stored },
+              user: { ...fakeScopeSnapshot.user, [field]: stored }
             };
           }
           fakeScopeSnapshot = { ...fakeScopeSnapshot, revision: (fakeScopeSnapshot.revision || 0) + 1 };
@@ -949,6 +982,9 @@ collectButtons(detachTree).find((b) => b.text.startsWith(tZh("batch.start"))).pr
 // its subscription is dropped, while the runner itself keeps going.
 const pageRun = detachBatch.isRunning();
 if (pageRun !== true) throw new Error("batch should be running after start");
+// Closing the page unmounts it, so its own hook state goes away (this component
+// only — the runner lives in plugin scope, which is the point of the test).
+componentState.set(capturedExport.BatchTitleOptimizer, []);
 state = [];
 pendingEffects = [];
 releaseDetach();
@@ -1589,6 +1625,235 @@ if (acceptedUi.maxTitleCharacters !== 20 || acceptedUi.titleDatePosition !== "su
 }
 console.log("✓ client: title-shape controls render, write the right values, and pass host validation");
 
+// ---- client: style / language / exclusions -------------------------------
+fakeScopeSnapshot = {
+  status: "ready",
+  value: { enabled: true, titleStyle: "short-name", titleLanguage: "en", titleExclusions: ["客户甲", "Acme"] },
+  user: { titleStyle: "short-name", titleLanguage: "en", titleExclusions: ["客户甲", "Acme"] },
+  writable: true
+};
+const contentTree = await settle(capturedExport.SettingsSection, { scope, t: tZh, describe: describeFace, remote: fakeRemote });
+const contentText = renderTree(contentTree).join(" ");
+for (const key of ["settings.style", "settings.language", "settings.exclusions", "settings.contentHint", "settings.exclusionsHint"]) {
+  if (!contentText.includes(tZh(key))) throw new Error(`zh content block missing ${key}`);
+}
+for (const phrase of ["Title exclusions", "Short task name", "Exclusions", "One per line"]) {
+  if (contentText.includes(phrase)) throw new Error(`zh content block LEAK: '${phrase}'`);
+}
+const contentSelects = collectSelects(contentTree);
+const styleSelect = contentSelects.find((s) => s.options.some((o) => o.value === "short-name"));
+const languageSelect = contentSelects.find((s) => s.options.some((o) => o.value === "en"));
+if (!styleSelect || !languageSelect) throw new Error("style/language selects missing");
+// The empty option is the unset: "Default" follows the plugin policy and "Auto"
+// follows the message, so the host needs no sentinel value.
+for (const value of ["", "short-name", "action-object"]) {
+  if (!styleSelect.options.some((o) => o.value === value)) throw new Error(`style select is missing option '${value}'`);
+}
+for (const value of ["", "zh", "en"]) {
+  if (!languageSelect.options.some((o) => o.value === value)) throw new Error(`language select is missing option '${value}'`);
+}
+const exclusionsBox = findFirstElement(contentTree, (n) => n.type === "textarea");
+if (!exclusionsBox) throw new Error("exclusions textarea missing");
+if (exclusionsBox.props.value !== "客户甲\nAcme") {
+  throw new Error(`the textarea must show one saved term per line, got ${JSON.stringify(exclusionsBox.props.value)}`);
+}
+
+const styleElement = findFirstElement(contentTree, (n) => n.type === "select" && optionValues(n).includes("short-name"));
+const languageElement = findFirstElement(contentTree, (n) => n.type === "select" && optionValues(n).includes("zh"));
+if (!styleElement || !languageElement) throw new Error("style/language select elements unreachable");
+scopeSets.length = 0;
+scopeUnsets.length = 0;
+styleElement.props.onChange({ target: { value: "action-object" } });
+await flushWrites();
+if (!scopeSets.some(([field, value]) => field === "titleStyle" && value === "action-object")) {
+  throw new Error(`choosing a style must write titleStyle (writes=${JSON.stringify(scopeSets)})`);
+}
+styleElement.props.onChange({ target: { value: "" } });
+await flushWrites();
+if (!scopeUnsets.includes("titleStyle")) throw new Error("choosing 'Default' must unset titleStyle, not write a sentinel");
+scopeSets.length = 0;
+scopeUnsets.length = 0;
+languageElement.props.onChange({ target: { value: "zh" } });
+await flushWrites();
+if (!scopeSets.some(([field, value]) => field === "titleLanguage" && value === "zh")) {
+  throw new Error(`choosing a language must write titleLanguage (writes=${JSON.stringify(scopeSets)})`);
+}
+languageElement.props.onChange({ target: { value: "" } });
+await flushWrites();
+if (!scopeUnsets.includes("titleLanguage")) throw new Error("choosing 'Auto' must unset titleLanguage");
+
+// The textarea writes a LIST: blanks and duplicates are dropped client-side so the
+// write is already in the shape the host stores.
+scopeSets.length = 0;
+scopeUnsets.length = 0;
+exclusionsBox.props.onChange({ target: { value: "  客户甲  \n\nAcme\n客户甲\n" } });
+await flushWrites();
+const exclusionWrite = scopeSets.find(([field]) => field === "titleExclusions");
+if (!exclusionWrite) throw new Error(`the textarea must write titleExclusions (writes=${JSON.stringify(scopeSets)})`);
+if (JSON.stringify(exclusionWrite[1]) !== JSON.stringify(["客户甲", "Acme"])) {
+  throw new Error(`the textarea must trim, drop blanks and dedupe, got ${JSON.stringify(exclusionWrite[1])}`);
+}
+// An emptied box is an unset, never an empty array.
+exclusionsBox.props.onChange({ target: { value: "\n   \n" } });
+await flushWrites();
+if (!scopeUnsets.includes("titleExclusions")) throw new Error("clearing the textarea must unset titleExclusions");
+// What the UI can write, the host must accept — including the round trip through
+// the settings-write check, which sees a fresh array from the host, not ours.
+const acceptedContentUi = settingsModule.resolveTitleSettings({
+  enabled: true, titleStyle: "short-name", titleLanguage: "en", titleExclusions: ["客户甲", "Acme"]
+});
+if (acceptedContentUi.titleStyle !== "short-name" || acceptedContentUi.titleLanguage !== "en") {
+  throw new Error("the UI's own style/language writes must be accepted by resolveTitleSettings");
+}
+if (JSON.stringify(acceptedContentUi.titleExclusions) !== JSON.stringify(["客户甲", "Acme"])) {
+  throw new Error("the UI's own exclusion write must survive host validation unchanged");
+}
+console.log("✓ client: style/language/exclusion controls render, write the right values, and pass host validation");
+
+// An over-long line must be refused with its own message rather than surfacing as
+// the generic "settings could not be saved" the rejected write would produce.
+scopeSets.length = 0;
+scopeUnsets.length = 0;
+const overlongProps = { scope, t: tZh, describe: describeFace, remote: fakeRemote };
+let overlongTree = await settle(capturedExport.SettingsSection, overlongProps);
+const overlongBox = findFirstElement(overlongTree, (n) => n.type === "textarea");
+overlongBox.props.onChange({ target: { value: "x".repeat(65) } });
+await flushWrites();
+// The error lives in component state, so the tree must be re-rendered to see it.
+overlongTree = await flush(capturedExport.SettingsSection, overlongProps, overlongTree);
+if (scopeSets.some(([field]) => field === "titleExclusions") || scopeUnsets.includes("titleExclusions")) {
+  throw new Error("an over-long exclusion must not be written at all");
+}
+if (!renderTree(overlongTree).join(" ").includes(tZh("settings.invalidExclusions"))) {
+  throw new Error("an over-long exclusion must be reported with its own message");
+}
+console.log("✓ client: an over-long exclusion is refused with a named message");
+
+// ---- client: the title lock and its two entry points ----------------------
+if (typeof capturedExport.LockTitleAction !== "function") throw new Error("LockTitleAction not exported");
+if (typeof capturedExport.isLockedIn !== "function") throw new Error("isLockedIn not exported");
+
+// The lock-set reader is the shared decision point: absent, empty, non-list and
+// a missing snapshot all mean "nothing locked", never a crash or a false lock.
+for (const [label, snapshot, sessionId, expected] of [
+  ["a locked id", { user: { lockedSessionIds: ["a"] } }, "a", true],
+  ["another id", { user: { lockedSessionIds: ["a"] } }, "b", false],
+  ["an absent list", { user: {} }, "a", false],
+  ["no user section", {}, "a", false],
+  ["an empty list", { user: { lockedSessionIds: [] } }, "a", false],
+  ["no snapshot", undefined, "a", false],
+  ["an empty id", { user: { lockedSessionIds: [""] } }, "", false]
+]) {
+  if (capturedExport.isLockedIn(snapshot, sessionId) !== expected) {
+    throw new Error(`isLockedIn must be ${expected} for ${label}`);
+  }
+}
+if (capturedExport.lockedIdsOf({ user: { lockedSessionIds: "not-a-list" } }).length !== 0) {
+  throw new Error("a non-list lock value must read as nothing locked");
+}
+
+// Unlocked: the click records exactly this session id in the settings namespace.
+fakeScopeSnapshot = { status: "ready", value: { enabled: true }, user: {}, writable: true, revision: 0 };
+scopeSets.length = 0;
+scopeUnsets.length = 0;
+const lockProps = { sessionId: "s-lock", t: tZh, scope };
+let lockTree = await settle(capturedExport.LockTitleAction, lockProps);
+if (lockTree.props["aria-label"] !== tZh("lock.lock")) {
+  throw new Error(`an unlocked session must offer "lock", got ${lockTree.props["aria-label"]}`);
+}
+if (lockTree.props["aria-pressed"] !== "false") throw new Error("an unlocked button must not report pressed");
+lockTree.props.onClick();
+await flushWrites();
+const lockWrite = scopeSets.find(([field]) => field === "lockedSessionIds");
+if (!lockWrite) throw new Error(`locking must write lockedSessionIds (writes=${JSON.stringify(scopeSets)})`);
+if (JSON.stringify(lockWrite[1]) !== JSON.stringify(["s-lock"])) {
+  throw new Error(`a lock must add exactly this session id, got ${JSON.stringify(lockWrite[1])}`);
+}
+// The button must show the NEW state without a reload, and offer the inverse action.
+lockTree = await flush(capturedExport.LockTitleAction, lockProps, lockTree);
+if (lockTree.props["aria-pressed"] !== "true") {
+  throw new Error("the lock button must reflect the state it just wrote");
+}
+if (lockTree.props["aria-label"] !== tZh("lock.unlock")) {
+  throw new Error(`a locked session must offer "unlock", got ${lockTree.props["aria-label"]}`);
+}
+// The second click re-reads the list at click time, so unlocking removes the id and
+// an empty list becomes an unset rather than an empty array in settings.yaml.
+scopeSets.length = 0;
+scopeUnsets.length = 0;
+lockTree.props.onClick();
+await flushWrites();
+if (!scopeUnsets.includes("lockedSessionIds")) {
+  throw new Error("removing the last lock must unset the field, not store an empty list");
+}
+console.log("✓ client: the lock toggle writes, un-writes and reports the session state");
+
+// Locked: the regenerate button beside it refuses locally, WITH the reason —
+// the host's own refusal only surfaces as a generic failure.
+fakeScopeSnapshot = { status: "ready", value: { enabled: true }, user: { lockedSessionIds: ["s-lock"] }, writable: true, revision: 1 };
+const lockedRta = await settle(capturedExport.RegenerateTitleAction, {
+  sessionId: "s-lock",
+  regenerate: () => Promise.resolve({ ok: true, value: { result: { kind: "success" } } }),
+  t: tZh,
+  scope
+});
+if (lockedRta.props.disabled !== true) throw new Error("a locked session must disable the regenerate button");
+if (lockedRta.props["aria-label"] !== tZh("action.locked")) {
+  throw new Error(`a locked session must name the lock, got ${lockedRta.props["aria-label"]}`);
+}
+if (lockedRta.props.title !== tZh("action.locked")) {
+  throw new Error("the lock reason must be the button's tooltip, not the generic failure text");
+}
+const lockedRtaEn = await settle(capturedExport.RegenerateTitleAction, {
+  sessionId: "s-lock",
+  regenerate: () => Promise.resolve({ ok: true, value: { result: { kind: "success" } } }),
+  t: tEn,
+  scope
+});
+if (lockedRtaEn.props["aria-label"] !== tEn("action.locked")) {
+  throw new Error(`RegenerateTitleAction lock label not en: ${lockedRtaEn.props["aria-label"]}`);
+}
+// ...and an UNLOCKED session keeps the button enabled: the gate is the lock only.
+const openRta = await settle(capturedExport.RegenerateTitleAction, {
+  sessionId: "s-open",
+  regenerate: () => Promise.resolve({ ok: true, value: { result: { kind: "success" } } }),
+  t: tZh,
+  scope
+});
+if (openRta.props.disabled !== false) throw new Error("an unlocked session must keep regeneration enabled");
+console.log("✓ client: a locked session disables regeneration locally and says why");
+
+// The batch list drops locked sessions, reports how many, and cannot select them.
+const lockBatchRows = [
+  { sessionId: "lock-me", blank: false, cwd: "/proj/a", updatedAt: 1700000000000 },
+  { sessionId: "keep-me", blank: false, cwd: "/proj/a", updatedAt: 1700000001000 }
+];
+const lockBatchProps = {
+  t: tZh,
+  batch: capturedExport.createBatchController(() => Promise.resolve()),
+  listSessions: () => Promise.resolve({ ok: true, value: { items: lockBatchRows } }),
+  disabled: false,
+  lockedSessionIds: ["lock-me"]
+};
+let lockBatchTree = await settle(capturedExport.BatchTitleOptimizer, lockBatchProps);
+collectButtons(lockBatchTree).find((b) => b.text === tZh("batch.load")).props.onClick();
+lockBatchTree = await flush(capturedExport.BatchTitleOptimizer, lockBatchProps, lockBatchTree);
+const lockBatchText = renderTree(lockBatchTree).join(" ");
+if (!lockBatchText.includes(tZh("batch.count") + ": 1")) {
+  throw new Error(`the batch list must count only unlocked sessions: ${lockBatchText}`);
+}
+if (!lockBatchText.includes(tZh("batch.skippedLocked") + ": 1")) {
+  throw new Error(`the batch list must report the locked session it skipped: ${lockBatchText}`);
+}
+// Select-all is the strongest check that the row is really gone: a locked session
+// that were merely hidden could still be swept into the run here.
+collectButtons(lockBatchTree).find((b) => b.text === tZh("batch.selectAll")).props.onClick();
+lockBatchTree = await flush(capturedExport.BatchTitleOptimizer, lockBatchProps, lockBatchTree);
+if (!renderTree(lockBatchTree).join(" ").includes(tZh("batch.selectedCount") + ": 1")) {
+  throw new Error("select-all must not be able to select a locked session");
+}
+console.log("✓ client: the batch list excludes locked sessions and reports the count");
+
 // ---- host: the provider end to end (affix + cap on a real generate) ------
 // The shape logic is only worth anything if `generate()` passes the session's
 // creation time and the user's cap through to the accepted title, so the real
@@ -1676,6 +1941,229 @@ if (plain.title !== plainExpected.title) {
   throw new Error("an unconfigured provider must produce exactly the old title");
 }
 console.log("✓ host: generate() keeps the 80-byte budget and the no-affix default");
+
+// ---- host: exclusions end to end (redact → retry → mask) ------------------
+// The two-layer treatment is only worth anything if the REAL provider redacts
+// before the call and never abstains in a way that hands the session back to
+// DSH's fallback title (which is derived from the raw prompt and would put the
+// excluded word straight back onto the sidebar).
+const EXCLUDED = "客户甲";
+
+/** Drive the real provider with a chosen model output and a chosen message. */
+function exclusionRun(settings, modelText, message) {
+  const streams = [];
+  class TextAssembler {
+    constructor() { this.finish = { kind: "stop" }; }
+    push() {}
+    blocks() { return [{ type: "text", text: modelText }]; }
+  }
+  const provider = providerModule.createSmartSessionTitleProvider(
+    () => ({ config: baseConfig, settings: settingsModule.resolveTitleSettings(settings) }),
+    {
+      llm: { stream: async function* (options) { streams.push(options); yield { type: "text" }; } },
+      createUserMessage: (m) => m,
+      BlockAssembler: TextAssembler,
+      now: () => CREATED_AT,
+      readTitle: () => undefined,
+      consumeExplicitRegeneration: () => false
+    }
+  );
+  const run = provider.generate({
+    session: { id: "exclusion-session", header: { createdAt: CREATED_AT } },
+    route: { provider: "scnet", model: "DeepSeek-V4-Flash" },
+    messages: [{ seq: 1, text: message }],
+    signal: new AbortController().signal
+  });
+  return { run, streams };
+}
+const promptTextOf = (options) => options.messages[0].content[0].text;
+
+// A compliant model: the term is gone before the call, in both halves of the prompt.
+const compliant = exclusionRun({ titleExclusions: [EXCLUDED] }, "修复订单导出错误", `修复${EXCLUDED}的订单导出错误，不要改公开 API`);
+const compliantResult = await compliant.run;
+if (compliantResult.title !== "修复订单导出错误") {
+  throw new Error(`a compliant title must be accepted as-is: ${compliantResult.title}`);
+}
+if (compliant.streams.length !== 1) throw new Error("a clean title must need exactly one call");
+for (const options of compliant.streams) {
+  if (promptTextOf(options).includes(EXCLUDED)) throw new Error("the term must be removed from the message the model receives");
+  if (options.system.includes(EXCLUDED)) throw new Error("the term must never appear in the system prompt");
+  if (!options.system.includes("removed from the message on purpose")) {
+    throw new Error("a configured exclusion list must tell the model that names were removed");
+  }
+}
+console.log("✓ host: exclusions are deleted before the model call and never sent");
+
+// A model that ignores the removal: exactly one retry, then a deterministic mask.
+const stubborn = exclusionRun({ titleExclusions: [EXCLUDED] }, `修复${EXCLUDED}的订单导出错误`, `修复${EXCLUDED}的订单导出错误`);
+const stubbornResult = await stubborn.run;
+if (stubborn.streams.length !== 2) {
+  throw new Error(`a surviving term must be retried exactly once (calls=${stubborn.streams.length})`);
+}
+if (stubbornResult.title !== "修复的订单导出错误") {
+  throw new Error(`masking must delete the term in place: ${stubbornResult.title}`);
+}
+if (!promptTextOf(stubborn.streams[1]).includes("Never restore a name that was removed")) {
+  throw new Error("the retry must forbid restoring a removed name");
+}
+console.log("✓ host: a surviving term is retried once, then deleted from the title");
+
+// A term the model keeps returning AND that cannot be masked away: fail loudly.
+// The service's fallback is the documented (and unavoidable) limit here.
+let unmaskableError;
+try {
+  await exclusionRun({ titleExclusions: [EXCLUDED] }, EXCLUDED, `修复${EXCLUDED}的订单导出错误`).run;
+} catch (error) {
+  unmaskableError = error;
+}
+if (!(unmaskableError instanceof Error) || !/after masking/.test(unmaskableError.message)) {
+  throw new Error(`an unmaskable title must fail loudly, got ${String(unmaskableError)}`);
+}
+console.log("✓ host: an unmaskable title fails loudly instead of storing an empty one");
+
+// A prompt that was nothing but excluded terms: decline before spending a call.
+const wholeTaskIsExcluded = "帮我修复登录接口的超时问题";
+const emptyRun = exclusionRun({ titleExclusions: [wholeTaskIsExcluded] }, "unused", wholeTaskIsExcluded);
+let abstainedError;
+try {
+  await emptyRun.run;
+} catch (error) {
+  abstainedError = error;
+}
+if (!(abstainedError instanceof providerModule.TitleAbstention) || abstainedError.abstentionReason !== "empty-after-redaction") {
+  throw new Error(`an all-excluded prompt must abstain, got ${String(abstainedError)}`);
+}
+if (emptyRun.streams.length !== 0) {
+  throw new Error("an all-excluded prompt must not reach the model at all");
+}
+console.log("✓ host: an all-excluded prompt abstains without a model call");
+
+// Case-insensitivity, end to end: a Latin term is matched the way the UI promises.
+const latinRun = exclusionRun({ titleExclusions: ["Acme"] }, "Fix ACME login timeout", "Fix Acme login timeout");
+const latinResult = await latinRun.run;
+if (latinResult.title.includes("ACME") || latinResult.title.includes("Acme")) {
+  throw new Error(`a Latin exclusion must match case-insensitively: ${latinResult.title}`);
+}
+console.log("✓ host: a Latin exclusion matches case-insensitively end to end");
+
+// The style and language preferences must reach the model, not just the settings page.
+const shaped = exclusionRun({ titleStyle: "short-name", titleLanguage: "en" }, "Login endpoint timeout", "帮我修复登录接口的超时问题");
+await shaped.run;
+const shapedStream = shaped.streams[0];
+if (!shapedStream.system.includes("compact noun phrase")) {
+  throw new Error("the chosen style must reach the system prompt");
+}
+if (!shapedStream.system.includes("Write the title in English")) {
+  throw new Error("the chosen language must reach the system prompt");
+}
+console.log("✓ host: style and language reach the model on a real generate()");
+
+// ---- host: the lock gates the provider, and must not spend the permission ----
+// `/retitle` refuses a locked session in its own handler (covered by the host
+// policy suite). This is the OTHER entry point: an automatic schedule, or a token
+// that was granted before the lock was set. Both must abstain, and neither may
+// consume the explicit marker — a spent permission would be inherited by the next
+// automatic schedule and rewrite the very title the lock protects.
+let lockTokensConsumed = 0;
+const lockStreams = [];
+class LockAssembler {
+  constructor() { this.finish = { kind: "stop" }; }
+  push() {}
+  blocks() { return [{ type: "text", text: "修复登录接口超时" }]; }
+}
+const lockedProvider = providerModule.createSmartSessionTitleProvider(
+  () => ({ config: baseConfig, settings: settingsModule.resolveTitleSettings({ lockedSessionIds: ["locked-session"] }) }),
+  {
+    llm: { stream: async function* (options) { lockStreams.push(options); yield { type: "text" }; } },
+    createUserMessage: (m) => m,
+    BlockAssembler: LockAssembler,
+    now: () => CREATED_AT,
+    readTitle: () => undefined,
+    consumeExplicitRegeneration: () => { lockTokensConsumed += 1; return true; }
+  }
+);
+let lockedError;
+try {
+  await lockedProvider.generate({
+    session: { id: "locked-session", header: { createdAt: CREATED_AT } },
+    route: { provider: "scnet", model: "DeepSeek-V4-Flash" },
+    messages: [{ seq: 1, text: "帮我修复登录接口的超时问题" }],
+    signal: new AbortController().signal
+  });
+} catch (error) {
+  lockedError = error;
+}
+if (!(lockedError instanceof providerModule.TitleAbstention) || lockedError.abstentionReason !== "locked") {
+  throw new Error(`a locked session must abstain with reason "locked", got ${String(lockedError)}`);
+}
+if (lockTokensConsumed !== 0) {
+  throw new Error("a locked session must NOT consume the explicit-regeneration token");
+}
+if (lockStreams.length !== 0) {
+  throw new Error("a locked session must not reach the model at all");
+}
+// The same session, unlocked, still generates — the gate is the lock, not the id.
+const unlockedProvider = providerModule.createSmartSessionTitleProvider(
+  () => ({ config: baseConfig, settings: settingsModule.resolveTitleSettings({ lockedSessionIds: ["other-session"] }) }),
+  {
+    llm: { stream: async function* () { yield { type: "text" }; } },
+    createUserMessage: (m) => m,
+    BlockAssembler: LockAssembler,
+    now: () => CREATED_AT,
+    readTitle: () => undefined,
+    consumeExplicitRegeneration: () => false
+  }
+);
+const unlockedResult = await unlockedProvider.generate({
+  session: { id: "locked-session", header: { createdAt: CREATED_AT } },
+  route: { provider: "scnet", model: "DeepSeek-V4-Flash" },
+  messages: [{ seq: 1, text: "帮我修复登录接口的超时问题" }],
+  signal: new AbortController().signal
+});
+if (unlockedResult.title === "") throw new Error("a session that is not in the lock list must still generate");
+// The lock outranks the content gates, so the diagnostic names the user's own
+// decision rather than a generic "nothing to title yet".
+let emptyLockedError;
+try {
+  await lockedProvider.generate({
+    session: { id: "locked-session", header: { createdAt: CREATED_AT } },
+    route: { provider: "scnet", model: "DeepSeek-V4-Flash" },
+    messages: [],
+    signal: new AbortController().signal
+  });
+} catch (error) {
+  emptyLockedError = error;
+}
+if (!(emptyLockedError instanceof providerModule.TitleAbstention) || emptyLockedError.abstentionReason !== "locked") {
+  throw new Error(`a locked session with no messages must still report "locked", got ${String(emptyLockedError)}`);
+}
+// ...and the same empty input WITHOUT the lock reports the generic reason, which is
+// what makes the assertion above about ordering rather than about empty input.
+let emptyOpenError;
+try {
+  await providerModule.createSmartSessionTitleProvider(
+    () => ({ config: baseConfig, settings: settingsModule.resolveTitleSettings({}) }),
+    {
+      llm: { stream: async function* () { yield { type: "text" }; } },
+      createUserMessage: (m) => m,
+      BlockAssembler: LockAssembler,
+      now: () => CREATED_AT,
+      readTitle: () => undefined,
+      consumeExplicitRegeneration: () => false
+    }
+  ).generate({
+    session: { id: "locked-session", header: { createdAt: CREATED_AT } },
+    route: { provider: "scnet", model: "DeepSeek-V4-Flash" },
+    messages: [],
+    signal: new AbortController().signal
+  });
+} catch (error) {
+  emptyOpenError = error;
+}
+if (!(emptyOpenError instanceof providerModule.TitleAbstention) || emptyOpenError.abstentionReason !== "no-source-message") {
+  throw new Error(`an unlocked session with no messages must report no-source-message, got ${String(emptyOpenError)}`);
+}
+console.log("✓ host: the lock abstains without a model call and without spending the /retitle permission");
 
 
 
