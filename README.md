@@ -3,7 +3,7 @@
 English | [简体中文](README.zh-CN.md)
 
 Smarter automatic session titles for **DeepSeek Harness (DSH)**.
-**0.5.0-rc.1 — release candidate**, intended for the npm `next` tag.
+**0.5.0-rc.2 — release candidate**, intended for the npm `next` tag.
 
 ## What it does
 
@@ -433,3 +433,7 @@ The settings page uses four collapsible cards: model, title shape and content, a
 All four sections start collapsed and show concise saved-setting summaries;
 an active batch opens its controls automatically. The layout adapts to narrow
 windows, and form fields have associated labels and visible keyboard focus.
+
+The expanded title-format section groups style, language and length together,
+places dates on a separate row, and gives exclusion words a full-width editor.
+Detailed rules stay in a collapsed help section.

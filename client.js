@@ -50,7 +50,7 @@ window.__ModuleLoader__.load({
      * The two are kept in sync deliberately: `validation/verify-i18n.mjs`
      * fails when this string and package.json's `version` drift apart.
      */
-    var PLUGIN_VERSION = "0.5.0-rc.1";
+    var PLUGIN_VERSION = "0.5.0-rc.2";
 
     /**
      * Where the batch block remembers its automatic-fallback checkbox. It is a
@@ -108,7 +108,7 @@ window.__ModuleLoader__.load({
       "settings.defaultLength": "默认字数",
       "settings.characterUnit": "字",
       "settings.defaultParameters": "默认超时与重试",
-      "settings.formatHelp": "字数与日期说明",
+      "settings.formatHelp": "格式与排除规则说明",
       "settings.shapeSummary": "留空使用默认字数，日期取会话创建时间。",
       "batch.summary": "选择会话后批量重新生成。",
       "batch.help": "费用与模型说明",
@@ -156,6 +156,7 @@ window.__ModuleLoader__.load({
       "settings.dateFormatMd": "09-13",
       "settings.shapeHint": "字数上限留空表示继承部署配置（80 字节，约 26 个汉字或 80 个西文字符）。日期取会话创建时间（本地时区），重新生成标题不会改变它；选择后缀时，字数会先为日期留出空间，确保日期不被截掉。",
       "settings.exclusions": "标题排除词",
+      "settings.exclusionsBrief": "每行一个，最多 50 个。仅限插件生成的标题；不影响兜底标题、人工标题或对话原文。",
       "settings.exclusionsPlaceholder": "每行一个，例如：\n客户甲\n内部项目代号",
       "settings.exclusionsSummary": "排除词",
       "settings.exclusionsHint": "这些词会在生成前从提示文本中删除，生成后再检查一次；标题里仍出现时先重试一次，最后一次直接删掉该词，而不是放弃这个标题。按字面匹配，含英文字母时忽略大小写；别名、缩写、译名需分别添加。",
@@ -237,7 +238,7 @@ window.__ModuleLoader__.load({
       "settings.defaultLength": "Default length",
       "settings.characterUnit": "characters",
       "settings.defaultParameters": "Default timeout and retries",
-      "settings.formatHelp": "About character limits and dates",
+      "settings.formatHelp": "Format and exclusion details",
       "settings.shapeSummary": "Leave the limit empty for defaults. Dates use session creation time.",
       "batch.summary": "Select sessions to retitle together.",
       "batch.help": "Costs and model details",
@@ -275,7 +276,7 @@ window.__ModuleLoader__.load({
       "settings.languageZh": "Chinese",
       "settings.languageEn": "English",
       "settings.contentHint": "\"Auto\" follows the language primarily used by the task; technology names (React, API, …) stay as they are. Style and language apply to automatic, manual and batch generation, and changing them never rewrites an existing title.",
-      "settings.maxCharacters": "Maximum title characters",
+      "settings.maxCharacters": "Character limit",
       "settings.dateAffix": "Date position",
       "settings.dateAffixOff": "None",
       "settings.dateAffixPrefix": "Prefix",
@@ -284,8 +285,9 @@ window.__ModuleLoader__.load({
       "settings.dateFormatYmd": "2026-09-13",
       "settings.dateFormatMd": "09-13",
       "settings.shapeHint": "An empty character limit inherits the deployment config (80 bytes: about 26 CJK characters or 80 Latin characters). The date is the session's creation time in local time and does not move when a title is regenerated; a suffix date reserves its own space inside the limit so it is never cut off.",
-      "settings.exclusions": "Title exclusions",
-      "settings.exclusionsPlaceholder": "One per line, for example:\nAcme Corp\ninternal-project-x",
+      "settings.exclusions": "Excluded words",
+      "settings.exclusionsBrief": "One per line · Up to 50 words or phrases. Applies only to plugin-generated titles.",
+      "settings.exclusionsPlaceholder": "Acme Corp\ninternal-project-x",
       "settings.exclusionsSummary": "Exclusions",
       "settings.exclusionsHint": "These words are deleted from the prompt text before generation and checked again afterwards: a surviving term is retried once, then deleted from the title on the last attempt rather than giving the title up. Matching is literal, and case-insensitive when the term contains ASCII letters; aliases, abbreviations and translations must be added separately.",
       "settings.invalidExclusions": "Each exclusion takes one line of at most 64 characters, with at most 50 entries.",
@@ -531,7 +533,7 @@ window.__ModuleLoader__.load({
     }
 
     var SETTINGS_CSS = `
-.sst-settings { max-width: 760px; margin: 0 auto; padding: 4px 0 16px; font-size: 13px; line-height: 1.55; color: inherit; }
+.sst-settings { container-type: inline-size; container-name: sst-settings; max-width: 760px; margin: 0 auto; padding: 4px 0 16px; font-size: 13px; line-height: 1.55; color: inherit; }
 .sst-settings * { box-sizing: border-box; }
 .sst-page-heading { margin: 0 0 20px; }
 .sst-page-heading h2 { font-size: 20px; font-weight: 600; margin: 0 0 5px; letter-spacing: -.3px; }
@@ -545,11 +547,18 @@ window.__ModuleLoader__.load({
 .sst-mode > label { display: inline-flex !important; border: 1px solid var(--dsw-alias-border-l4); border-radius: 7px; padding: 7px 10px !important; margin: 0 6px 6px 0; gap: 6px; }
 .sst-mode > label:has(input:checked) { background: var(--dsw-alias-bg-base); border-color: var(--dsw-alias-label-tertiary); }
 .sst-settings input, .sst-settings select { accent-color: #8abcf4; max-width: 100%; }
-.sst-settings input:focus-visible, .sst-settings select:focus-visible, .sst-settings button:focus-visible, .sst-settings summary:focus-visible { outline: 2px solid #8abcf4; outline-offset: 3px; }
+.sst-settings textarea:focus-visible, .sst-settings input:focus-visible, .sst-settings select:focus-visible, .sst-settings button:focus-visible, .sst-settings summary:focus-visible { outline: 2px solid #8abcf4; outline-offset: 3px; }
 .sst-settings button { min-height: 32px; border-radius: 7px; padding: 6px 12px; border: 1px solid var(--dsw-alias-border-l4); background: var(--dsw-alias-bg-base); color: inherit; cursor: pointer; }
 .sst-settings button:disabled { opacity: .5; cursor: default; }
 .sst-settings .sst-save-route { justify-self: start; padding: 7px 14px; font-weight: 500; }
-.sst-settings .sst-shape { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0 !important; min-width: 0; }
+.sst-settings .sst-shape { display: flex; flex-direction: column; gap: 18px; margin: 0 !important; min-width: 0; }
+.sst-content-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.sst-date-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.sst-exclusions { border-top: 1px solid var(--dsw-alias-border-l4); padding-top: 16px; }
+.sst-exclusions textarea { display: block; width: 100%; min-height: 88px; line-height: 1.6; padding: 10px 12px; margin-bottom: 8px; }
+.sst-content-fields > div, .sst-date-fields > div { margin-bottom: 0 !important; min-width: 0; }
+.sst-format-help p { margin-bottom: 10px !important; }
+@container sst-settings (max-width: 400px) { .sst-content-fields, .sst-date-fields { grid-template-columns: minmax(0, 1fr); } }
 .sst-shape legend, .sst-shape-summary, .sst-format-help { grid-column: 1 / -1; }
 .sst-shape input, .sst-shape select { width: 100% !important; }
 .sst-settings summary { cursor: pointer; font-size: 12px; color: var(--dsw-alias-label-tertiary); }
@@ -2089,6 +2098,7 @@ window.__ModuleLoader__.load({
             { style: { fontWeight: 500, marginBottom: 4, padding: 0, fontSize: 13 } },
             t("settings.shapeLegend")
           ),
+          react.createElement("div", { className: "sst-content-fields" },
           // Phrasing and language. Both are enums whose empty option is the unset
           // that follows the plugin default / the message's own language, so the UI
           // never needs a sentinel the host would have to know about.
@@ -2149,7 +2159,9 @@ window.__ModuleLoader__.load({
                 writeField("maxTitleCharacters", event.target.value);
               }
             })
+          )
           ),
+          react.createElement("div", { className: "sst-date-fields" },
           react.createElement(
             "div",
             { style: { marginBottom: 6 } },
@@ -2190,29 +2202,31 @@ window.__ModuleLoader__.load({
               react.createElement("option", { value: "ymd" }, t("settings.dateFormatYmd")),
               react.createElement("option", { value: "md" }, t("settings.dateFormatMd"))
             )
+          )
           ),
           react.createElement(
             "div",
-            { style: { marginBottom: 6 } },
+            { className: "sst-exclusions" },
             react.createElement("label", { style: labelStyle, htmlFor: "sst-titleExclusions" }, t("settings.exclusions")),
             react.createElement("textarea", {
               id: "sst-titleExclusions",
-              rows: 4,
+              rows: 3,
               value: exclusionsText,
               disabled: busy,
               placeholder: t("settings.exclusionsPlaceholder"),
-              style: Object.assign({ width: "100%", maxWidth: 320, resize: "vertical" }, fieldStyle),
+              style: Object.assign({ width: "100%", resize: "vertical" }, fieldStyle),
               onChange: function (event) {
                 setExclusionDraft(event.target.value);
                 writeExclusions(event.target.value);
               }
             }),
-            react.createElement("p", { style: hintStyle }, t("settings.exclusionsHint"))
+            react.createElement("p", { style: hintStyle }, t("settings.exclusionsBrief"))
           ),
-          react.createElement("p", { className: "sst-shape-summary", style: hintStyle }, t("settings.contentHint")),
-          react.createElement("p", { className: "sst-shape-summary", style: hintStyle }, t("settings.shapeSummary")),
+
           react.createElement("details", { className: "sst-format-help" },
             react.createElement("summary", {}, t("settings.formatHelp")),
+            react.createElement("p", { style: Object.assign({}, hintStyle, { marginTop: 8 }) }, t("settings.contentHint")),
+            react.createElement("p", { style: Object.assign({}, hintStyle, { marginTop: 8 }) }, t("settings.exclusionsHint")),
             react.createElement("p", { style: Object.assign({}, hintStyle, { marginTop: 8 }) }, t("settings.shapeHint")),
             react.createElement("p", { style: Object.assign({}, hintStyle, { marginTop: 8 }) }, t("settings.exclusionsBoundary")))
         )
