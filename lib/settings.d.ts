@@ -75,6 +75,8 @@ export interface TitleSettings {
      * resort when one survives into the model's output.
      */
     readonly titleExclusions: readonly string[] | undefined;
+    /** Show the clickable session ID in the header; defaults to true. UI-only. */
+    readonly showSessionId: boolean;
     /**
      * Sessions whose title is locked.
      *

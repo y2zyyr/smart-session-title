@@ -3,7 +3,7 @@
 English | [简体中文](README.zh-CN.md)
 
 Smarter automatic session titles for **DeepSeek Harness (DSH)**.
-**0.5.0-rc.3 — release candidate**, intended for the npm `next` tag.
+**0.5.0-rc.6 — release candidate**, intended for the npm `next` tag.
 
 
 The settings page now shows model and title rules directly, with advanced options collapsed and visible save feedback. Batch optimization has a separate workspace with automatic loading, title/ID search, and back navigation. Batch routing reflects saved settings; fixed-model mode hides redundant automatic fallback. Date format appears only when a date affix is enabled.
@@ -440,3 +440,11 @@ windows, and form fields have associated labels and visible keyboard focus.
 The expanded title-format section groups style, language and length together,
 places dates on a separate row, and gives exclusion words a full-width editor.
 Detailed rules stay in a collapsed help section.
+
+### Copy the current SessionId
+
+The conversation header shows the current session ID in small, muted monospace text. Click to copy the full ID even when the display is truncated; hover to see the full value. Paste it into another conversation to help an agent locate this session (reading requires suitable tools and permissions). Open another session first to copy its ID. A failed clipboard write offers a read-only field for manual copying.
+
+In plugin settings, **Show SessionId in the conversation header** toggles this immediately. It is on by default, persists as `showSessionId`, and works independently of AI title generation and title locking. It does not change session titles.
+
+On DSH Desktop 2.0.9 the ID occupies a separate left-aligned line between the title toolbar and the conversation/trajectory tabs. This scoped layout depends on the verified host CSS class; if it changes, the ID falls back to the inline header slot.

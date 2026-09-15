@@ -45,6 +45,7 @@ export declare const Config: unknown;
  * below, and a credential has no declared field to hide behind.
  */
 /** @see resolveTitleSettings — typed as unknown because the settings service validates it at run time. */
+/** Includes the UI-only boolean showSessionId preference. */
 export declare const SettingsSchema: unknown;
 /** Composition base for the settings namespace: the switch starts on. */
 export declare const SETTINGS_BASE: Readonly<{

@@ -50,7 +50,7 @@ window.__ModuleLoader__.load({
      * The two are kept in sync deliberately: `validation/verify-i18n.mjs`
      * fails when this string and package.json's `version` drift apart.
      */
-    var PLUGIN_VERSION = "0.5.0-rc.3";
+    var PLUGIN_VERSION = "0.5.0-rc.6";
 
     /**
      * Where the batch block remembers its automatic-fallback checkbox. It is a
@@ -87,6 +87,12 @@ window.__ModuleLoader__.load({
 
     /** Simplified Chinese dictionary (the key-set source of truth). */
     var zh = {
+      "settings.showSessionId": "在对话顶部显示 SessionId",
+      "settings.showSessionIdHint": "默认开启。点击浅灰色会话 ID 可复制完整值，粘贴到其他对话可帮助 agent 定位此会话。能否读取取决于 agent 的工具与权限；复制其他会话的 ID 需先打开该会话。此开关独立于 AI 标题生成。",
+      "sessionId.copy": "复制当前会话 SessionId",
+      "sessionId.copied": "已复制",
+      "sessionId.failed": "复制失败，请重试或手动复制下方 ID",
+
       // Header action ----------------------------------------------
       "action.regenerate": "重新生成标题",
       "action.regenerating": "正在重新生成标题…",
@@ -230,6 +236,12 @@ window.__ModuleLoader__.load({
 
     /** English dictionary, key-identical to the Chinese source of truth. */
     var en = {
+      "settings.showSessionId": "Show SessionId in the conversation header",
+      "settings.showSessionIdHint": "On by default. Click the muted session ID to copy its full value, then paste it into another conversation to help an agent locate this session. Reading requires suitable tools and permissions. Open another session to copy its ID. This switch is independent of AI title generation.",
+      "sessionId.copy": "Copy current session ID",
+      "sessionId.copied": "Copied",
+      "sessionId.failed": "Copy failed; retry or manually copy the ID below",
+
       // Header action ----------------------------------------------
       "action.regenerate": "Regenerate title",
       "action.regenerating": "Regenerating title…",
@@ -1389,6 +1401,58 @@ window.__ModuleLoader__.load({
       });
     }
 
+    /** Read-only header utility; uses the existing session-scoped slot and settings mirror. */
+    function SessionIdAction(props) {
+      var t = translatorOf(props);
+      var scope = props.scope;
+      var pair = react.useState(function () { return scope && scope.getSnapshot(); });
+      var feedback = react.useState(null);
+      var request = react.useRef(0);
+      react.useEffect(function () {
+        if (!scope) return undefined;
+        pair[1](scope.getSnapshot());
+        return scope.subscribe(function () { pair[1](scope.getSnapshot()); });
+      }, [scope]);
+      react.useEffect(function () {
+        request.current += 1;
+        feedback[1](null);
+        return function () { request.current += 1; };
+      }, [props.sessionId]);
+      var snap = pair[0];
+      if (!snap || snap.status !== "ready" || (snap.user || {}).showSessionId === false || !props.sessionId) return null;
+      var state = feedback[0];
+      var label = state === "copied" ? t("sessionId.copied") : state === "failed" ? t("sessionId.failed") : t("sessionId.copy");
+      // DSH Desktop 2.0.9: titleRow precedes tabs (verified in shipped client).
+      // Scope positioning to a row containing our own element. If the host class
+      // changes, the utility safely falls back to its ordinary inline slot.
+      return react.createElement("span", { className: "sst-session-id", style: { display: "inline-flex", alignItems: "center", gap: 4, minWidth: 0 } },
+        react.createElement("style", {}, ".uPhUma_titleRow:has(.sst-session-id){position:relative;padding-bottom:16px}.uPhUma_titleRow .sst-session-id{position:absolute;left:8px;bottom:0;max-width:calc(100% - 8px);height:16px}.uPhUma_titleRow .sst-session-id>button{max-width:min(480px,70vw)!important;padding:0 6px 0 0!important;line-height:14px}.uPhUma_header:has(.sst-session-id) .uPhUma_tabs{margin-top:4px}.sst-session-id [role=status]{white-space:nowrap}"),
+        react.createElement("button", {
+          type: "button",
+          title: label + "\n" + props.sessionId,
+          "aria-label": label + ": " + props.sessionId,
+          style: { border: "none", background: "transparent", color: "var(--dsw-alias-label-tertiary)", fontSize: 11, fontFamily: "monospace", padding: "4px 6px", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer" },
+          onClick: function (event) {
+            event.stopPropagation();
+            var token = ++request.current;
+            return Promise.resolve().then(function () {
+              return window.navigator.clipboard.writeText(props.sessionId);
+            }).then(function () {
+              if (request.current === token) feedback[1]("copied");
+            }, function () {
+              if (request.current === token) feedback[1]("failed");
+            });
+          }
+        }, props.sessionId),
+        react.createElement("span", { role: "status", style: { fontSize: 11, color: "var(--dsw-alias-label-tertiary)" } }, state ? label : ""),
+        state === "failed" ? react.createElement("input", {
+          readOnly: true, value: props.sessionId, "aria-label": t("sessionId.copy"),
+          onFocus: function (event) { event.target.select(); },
+          style: { width: 160, fontSize: 11, color: "var(--dsw-alias-label-secondary)", background: "transparent" }
+        }) : null
+      );
+    }
+
     /** Client services this plugin needs. */
     var inject = [
       "slots",
@@ -1619,6 +1683,16 @@ window.__ModuleLoader__.load({
           LockTitleAction
         );
       });
+      ctx.slots.inject("conversation.session.header.actions", function () {
+        return ctx.slots.register({
+          name: "conversation.session.header.actions",
+          id: "smart-session-title-session-id",
+          order: 32,
+          label: "SessionId",
+          locale: NS,
+          inject: function (sessionId) { return { sessionId: sessionId, scope: settingsScope }; }
+        }, SessionIdAction);
+      });
     }
 
     exports.name = "smart-session-title-client";
@@ -1633,6 +1707,7 @@ window.__ModuleLoader__.load({
     exports.interpretOutcome = interpretOutcome;
     exports.RegenerateTitleAction = RegenerateTitleAction;
     exports.LockTitleAction = LockTitleAction;
+    exports.SessionIdAction = SessionIdAction;
     exports.lockedIdsOf = lockedIdsOf;
     exports.toggleSessionLock = toggleSessionLock;
     exports.isLockedIn = isLockedIn;
@@ -1842,6 +1917,15 @@ window.__ModuleLoader__.load({
       }
 
       var children = [];
+      var sessionIdSetting = react.createElement("div", { key: "showSessionId", style: { marginBottom: 16 } },
+        react.createElement("label", { style: { display: "flex", gap: 8, alignItems: "center", marginBottom: 4 } },
+          react.createElement("input", {
+            id: "sst-showSessionId", type: "checkbox", checked: user.showSessionId !== false, disabled: busy,
+            "aria-describedby": "sst-showSessionId-hint",
+            onChange: function (event) { return save([{ op: "set", path: ["showSessionId"], value: event.target.checked }]); }
+          }), t("settings.showSessionId")),
+        react.createElement("p", { id: "sst-showSessionId-hint", style: HINT_STYLE }, t("settings.showSessionIdHint"))
+      );
 
       children.push(
         react.createElement(
@@ -2393,6 +2477,7 @@ window.__ModuleLoader__.load({
           react.createElement("section", { className: "sst-section" }, children[shapeIndex],
             react.createElement("aside", { className: "sst-preview" },
               react.createElement("small", {}, t("settings.preview")), react.createElement("p", {}, example))),
+          react.createElement("section", { className: "sst-section" }, sessionIdSetting),
           settingsDisclosure(t("settings.advanced"), advancedSummary, children[advancedIndex]),
           react.createElement("section", { className: "sst-section" },
             react.createElement("h3", {}, t("batch.legend")),
