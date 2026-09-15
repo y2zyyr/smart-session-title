@@ -3,7 +3,7 @@
 English | [简体中文](README.zh-CN.md)
 
 Smarter automatic session titles for **DeepSeek Harness (DSH)**.
-**0.5.0-rc.6 — release candidate**, intended for the npm `next` tag.
+**0.5.0-rc.7 — release candidate**, intended for the npm `next` tag.
 
 
 The settings page now shows model and title rules directly, with advanced options collapsed and visible save feedback. Batch optimization has a separate workspace with automatic loading, title/ID search, and back navigation. Batch routing reflects saved settings; fixed-model mode hides redundant automatic fallback. Date format appears only when a date affix is enabled.
@@ -124,13 +124,7 @@ the exact build.
 remains effective until the user chooses a mode. The shipped bundle has no pin.
 Explicit `current-session` always uses the session route.
 
-For **Configured model**, enter both IDs and click **Save configured model**.
-All three route fields are saved atomically. IDs come from DSH's Models page;
-this plugin does not manage credentials or provide a model browser.
-Selecting the **Configured model** radio alone is not enough: with a usable pair
-already saved the plugin applies it immediately, otherwise the page states that
-the change is not in effect yet — until then titles keep following
-**Current session model**, i.e. the model each session logged.
+Edit settings, then click **Save settings** at the right of the model selection row. Changes stay local until saved; model and title rules are written together. Failed saves retain your edits. Batch optimization uses the last saved route. Provider and model must both be selected in fixed-model mode.
 **Advanced** exposes timeout and attempts. Empty numeric fields inherit the bundle
 configuration; deployment-level compression options are in `cordis.patch.yml`.
 
@@ -381,7 +375,7 @@ provider alongside this plugin. The supplied bundle replaces the built-in one.
 | Settings prevent startup | Invalid value or unknown field; correct the plugin namespace |
 | No successful generations in log files | Check Desktop log level and its file exporter |
 | Batch: most old sessions fail with `model error: upstream failure` | Those sessions logged a provider/model DSH no longer serves, so "Current session model" cannot work for them. The list flags them before the run; switch to Configured model (or tick the fallback) and use Retry failed |
-| Configured model selected, but titles still follow the session model | The provider+model pair was not saved. With a usable pair the radio now applies it immediately; otherwise the page says the change is not in effect yet |
+| Configured model selected, but titles still follow the session model | The provider+model pair was not saved. Click Save settings to apply the selected mode and model |
 | A batch vanished after I reloaded the window | The runner lives in the client half; a full window reload ends it. Titles already written stay |
 | Stop does not seem to end the run | Stop aborts the in-flight generation; if it lingers, the adapter ignored cancellation — check the log for the session that was running |
 
@@ -445,6 +439,10 @@ Detailed rules stay in a collapsed help section.
 
 The conversation header shows the current session ID in small, muted monospace text. Click to copy the full ID even when the display is truncated; hover to see the full value. Paste it into another conversation to help an agent locate this session (reading requires suitable tools and permissions). Open another session first to copy its ID. A failed clipboard write offers a read-only field for manual copying.
 
-In plugin settings, **Show SessionId in the conversation header** toggles this immediately. It is on by default, persists as `showSessionId`, and works independently of AI title generation and title locking. It does not change session titles.
+In plugin settings, **Show SessionId in the conversation header** changes this after clicking Save settings. It is on by default, persists as `showSessionId`, and works independently of AI title generation and title locking. It does not change session titles.
 
 On DSH Desktop 2.0.9 the ID occupies a separate left-aligned line between the title toolbar and the conversation/trajectory tabs. This scoped layout depends on the verified host CSS class; if it changes, the ID falls back to the inline header slot.
+
+The conversation header shows text labels for Regenerate title and Lock title / Title locked. Regeneration replaces the current title, including manual titles, without rerunning the conversation. Locking blocks automatic, manual and batch generation by this plugin; click Title locked to unlock. Chatting, manual renaming and DSH fallback titles remain available. The settings page explains these actions too.
+
+Settings use compact label/control rows. A unified Save settings button sits beside the model choices, and usage help is collapsed at the bottom, and batch optimization keeps its separate entry.

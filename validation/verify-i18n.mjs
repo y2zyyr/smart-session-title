@@ -132,7 +132,9 @@ const fakePrimitives = {};
 
 // ---- render helpers ------------------------------------------------------
 /** One synchronous render pass: hooks read from this component's own state. */
+let lastSettingsProps;
 function renderPass(component, props) {
+  if (component === capturedExport.SettingsSection) lastSettingsProps = props;
   cursor = 0;
   pendingEffects = [];
   if (!componentState.has(component)) componentState.set(component, []);
@@ -700,7 +702,7 @@ const rtaZh = await settle(capturedExport.RegenerateTitleAction, {
 });
 if (rtaZh.props["aria-label"] !== "重新生成标题")
   throw new Error(`RegenerateTitleAction aria-label not zh: ${rtaZh.props["aria-label"]}`);
-if (rtaZh.props.title !== "重新生成标题")
+if (rtaZh.props.title !== tZh("action.help"))
   throw new Error(`RegenerateTitleAction title not zh: ${rtaZh.props.title}`);
 
 const rtaEn = await settle(capturedExport.RegenerateTitleAction, {
@@ -1093,7 +1095,7 @@ if (!renderTree(settingsTree).join(" ").includes(tZh("settings.configuredUnsaved
   throw new Error("an unsaved configured mode must say so explicitly");
 }
 
-// With a usable pair already saved, choosing the mode applies it immediately.
+// With a saved pair, mode changes stay local until Save is clicked.
 fakeScopeSnapshot = {
   status: "ready",
   value: { enabled: true, provider: "scnet", model: "DeepSeek-V4-Flash" },
@@ -1103,6 +1105,9 @@ fakeScopeSnapshot = {
 settingsTree = await settle(capturedExport.SettingsSection, settingsProps());
 scopeMutations.length = 0;
 collectInputs(settingsTree, "radio").find((r) => r.props.value === "configured").props.onChange();
+settingsTree = await flush(capturedExport.SettingsSection, settingsProps(), settingsTree);
+if (scopeMutations.length) throw new Error("model edits must wait for Save");
+await findFirstElement(settingsTree, n => n.props?.className === "sst-save-route").props.onClick();
 settingsTree = await flush(capturedExport.SettingsSection, settingsProps(), settingsTree);
 const applied = scopeMutations.flat();
 for (const [path, value] of [["mode", "configured"], ["provider", "scnet"], ["model", "DeepSeek-V4-Flash"]]) {
@@ -1553,6 +1558,11 @@ console.log("✓ host: title-shape settings validate, bounded, and stay out of t
 // `save()` runs the write in a promise microtask, so every assertion below
 // flushes the queue first instead of reading a still-empty mutation log.
 const flushWrites = () => new Promise((resolve) => setTimeout(resolve, 0));
+async function saveSettingsAndFlush() {
+  const tree = await flush(capturedExport.SettingsSection, lastSettingsProps);
+  await findFirstElement(tree, n => n.props?.className === "sst-save-route").props.onClick();
+  await flushWrites();
+}
 
 fakeScopeSnapshot = { status: "ready", value: { enabled: true }, user: {}, writable: true };
 let shapeTree = await settle(capturedExport.SettingsSection, { scope, t: tZh, describe: describeFace, remote: fakeRemote });
@@ -1578,12 +1588,12 @@ if (!capInput) throw new Error("character-cap number input missing");
 scopeSets.length = 0;
 scopeUnsets.length = 0;
 capInput.props.onChange({ target: { value: "20" } });
-await flushWrites();
+await saveSettingsAndFlush();
 if (!scopeSets.some(([field, value]) => field === "maxTitleCharacters" && value === 20)) {
   throw new Error(`the character cap must be written as a number (writes=${JSON.stringify(scopeSets)})`);
 }
 capInput.props.onChange({ target: { value: "" } });
-await flushWrites();
+await saveSettingsAndFlush();
 if (!scopeUnsets.includes("maxTitleCharacters")) {
   throw new Error("an empty character cap must unset the field, not write 0");
 }
@@ -1596,18 +1606,18 @@ if (!positionElement || !formatElement) throw new Error("date position/format se
 scopeSets.length = 0;
 scopeUnsets.length = 0;
 positionElement.props.onChange({ target: { value: "suffix" } });
-await flushWrites();
+await saveSettingsAndFlush();
 if (!scopeSets.some(([field, value]) => field === "titleDatePosition" && value === "suffix")) {
   throw new Error(`choosing a suffix must write titleDatePosition (writes=${JSON.stringify(scopeSets)})`);
 }
 positionElement.props.onChange({ target: { value: "" } });
-await flushWrites();
+await saveSettingsAndFlush();
 if (!scopeUnsets.includes("titleDatePosition")) {
   throw new Error("choosing 'None' must unset titleDatePosition");
 }
 scopeSets.length = 0;
 formatElement.props.onChange({ target: { value: "md" } });
-await flushWrites();
+await saveSettingsAndFlush();
 if (!scopeSets.some(([field, value]) => field === "titleDateFormat" && value === "md")) {
   throw new Error(`choosing a date format must write titleDateFormat (writes=${JSON.stringify(scopeSets)})`);
 }
@@ -1660,22 +1670,22 @@ if (!styleElement || !languageElement) throw new Error("style/language select el
 scopeSets.length = 0;
 scopeUnsets.length = 0;
 styleElement.props.onChange({ target: { value: "action-object" } });
-await flushWrites();
+await saveSettingsAndFlush();
 if (!scopeSets.some(([field, value]) => field === "titleStyle" && value === "action-object")) {
   throw new Error(`choosing a style must write titleStyle (writes=${JSON.stringify(scopeSets)})`);
 }
 styleElement.props.onChange({ target: { value: "" } });
-await flushWrites();
+await saveSettingsAndFlush();
 if (!scopeUnsets.includes("titleStyle")) throw new Error("choosing 'Default' must unset titleStyle, not write a sentinel");
 scopeSets.length = 0;
 scopeUnsets.length = 0;
 languageElement.props.onChange({ target: { value: "zh" } });
-await flushWrites();
+await saveSettingsAndFlush();
 if (!scopeSets.some(([field, value]) => field === "titleLanguage" && value === "zh")) {
   throw new Error(`choosing a language must write titleLanguage (writes=${JSON.stringify(scopeSets)})`);
 }
 languageElement.props.onChange({ target: { value: "" } });
-await flushWrites();
+await saveSettingsAndFlush();
 if (!scopeUnsets.includes("titleLanguage")) throw new Error("choosing 'Auto' must unset titleLanguage");
 
 // The textarea writes a LIST: blanks and duplicates are dropped client-side so the
@@ -1683,7 +1693,7 @@ if (!scopeUnsets.includes("titleLanguage")) throw new Error("choosing 'Auto' mus
 scopeSets.length = 0;
 scopeUnsets.length = 0;
 exclusionsBox.props.onChange({ target: { value: "  客户甲  \n\nAcme\n客户甲\n" } });
-await flushWrites();
+await saveSettingsAndFlush();
 const exclusionWrite = scopeSets.find(([field]) => field === "titleExclusions");
 if (!exclusionWrite) throw new Error(`the textarea must write titleExclusions (writes=${JSON.stringify(scopeSets)})`);
 if (JSON.stringify(exclusionWrite[1]) !== JSON.stringify(["客户甲", "Acme"])) {
@@ -1691,7 +1701,7 @@ if (JSON.stringify(exclusionWrite[1]) !== JSON.stringify(["客户甲", "Acme"]))
 }
 // An emptied box is an unset, never an empty array.
 exclusionsBox.props.onChange({ target: { value: "\n   \n" } });
-await flushWrites();
+await saveSettingsAndFlush();
 if (!scopeUnsets.includes("titleExclusions")) throw new Error("clearing the textarea must unset titleExclusions");
 // What the UI can write, the host must accept — including the round trip through
 // the settings-write check, which sees a fresh array from the host, not ours.
@@ -1714,7 +1724,7 @@ const overlongProps = { scope, t: tZh, describe: describeFace, remote: fakeRemot
 let overlongTree = await settle(capturedExport.SettingsSection, overlongProps);
 const overlongBox = findFirstElement(overlongTree, (n) => n.type === "textarea");
 overlongBox.props.onChange({ target: { value: "x".repeat(65) } });
-await flushWrites();
+await saveSettingsAndFlush();
 // The error lives in component state, so the tree must be re-rendered to see it.
 overlongTree = await flush(capturedExport.SettingsSection, overlongProps, overlongTree);
 if (scopeSets.some(([field]) => field === "titleExclusions") || scopeUnsets.includes("titleExclusions")) {
@@ -2262,21 +2272,21 @@ for (const translate of [tZh, tEn]) {
     const input = collectInputs(tree, "number").find(i => i.props.min === 8);
     const before = scopeMutations.length;
     input.props.onChange({ target: { value: raw } });
-    await flushWrites(); tree = await flush(capturedExport.SettingsSection, props, tree);
+    await saveSettingsAndFlush(); tree = await flush(capturedExport.SettingsSection, props, tree);
     assert(scopeMutations.length === before, "invalid numeric input must not reach the host");
     assert(renderTree(tree).join(" ").includes(translate("settings.invalidNumber")), "invalid numeric input must have a localized explanation");
   }
   const originalMutate = scope.mutate;
   scope.mutate = () => Promise.resolve();
   collectInputs(tree, "number").find(i => i.props.min === 8).props.onChange({ target: { value: "20" } });
-  await flushWrites(); tree = await flush(capturedExport.SettingsSection, props, tree);
+  await saveSettingsAndFlush(); tree = await flush(capturedExport.SettingsSection, props, tree);
   assert(renderTree(tree).join(" ").includes(translate("settings.saveFailed")), "silently rejected write must show a localized error");
   scope.mutate = originalMutate;
   collectInputs(tree, "number").find(i => i.props.min === 8).props.onChange({ target: { value: "20" } });
-  await flushWrites(); tree = await flush(capturedExport.SettingsSection, props, tree);
+  await saveSettingsAndFlush(); tree = await flush(capturedExport.SettingsSection, props, tree);
   assert(!renderTree(tree).join(" ").includes(translate("settings.saveFailed")), "a successful retry must clear the error");
   collectInputs(tree, "number").find(i => i.props.min === 8).props.onChange({ target: { value: "20" } });
-  await flushWrites(); tree = await flush(capturedExport.SettingsSection, props, tree);
+  await saveSettingsAndFlush(); tree = await flush(capturedExport.SettingsSection, props, tree);
   assert(!renderTree(tree).join(" ").includes(translate("settings.saveFailed")), "saving an unchanged value must succeed");
 }
 console.log("✓ audit: numeric validation, silent write rejection, recovery and same-value saves in zh/en");
@@ -2309,7 +2319,9 @@ for (const translate of [tZh, tEn]) {
   let tree = await settle(capturedExport.SettingsSection, props);
   assert(!findFirstElement(tree, n => n.type === capturedExport.BatchTitleOptimizer), "batch workspace must not mount in settings");
   assert(collectInputs(tree, "radio").length === 2, "model picker has two choices");
-  assert(renderTree(tree).join(" ").includes("scnet / m"), "heading shows saved model");
+  assert(findFirstElement(tree, n => n.props?.className === "sst-save-route" && !n.props.hidden), "unified save stays visible");
+  assert(!findFirstElement(tree, n => n.props?.className === "sst-preview"), "compact settings omit static preview");
+  assert(findFirstElement(tree, n => n.type === "details" && n.props?.className === "sst-usage-help" && !n.props.open), "title action help starts collapsed");
   assert(findFirstElement(tree, n => n.props?.hidden === true && findFirstElement(n, c => c.props?.id === "sst-dateFormat")), "date format hidden without date affix");
   collectButtons(tree).find(b => b.text === translate("batch.open")).props.onClick();
   tree = await flush(capturedExport.SettingsSection, props, tree);
@@ -2361,13 +2373,55 @@ const idToggle = findFirstElement(idSettings, n => n.props?.id === "sst-showSess
 assert(idToggle.props.checked === true, "settings defaults on");
 await idToggle.props.onChange({ target: { checked: false } });
 await flushWrites();
+assert(renderPass(capturedExport.SessionIdAction, idProps) !== null, "unsaved visibility change leaves header intact");
+await saveSettingsAndFlush();
 idTree = renderPass(capturedExport.SessionIdAction, idProps);
 assert(idTree === null, "settings update hides mounted header immediately");
 await idToggle.props.onChange({ target: { checked: true } });
-await flushWrites();
+await saveSettingsAndFlush();
 assert(renderPass(capturedExport.SessionIdAction, idProps) !== null, "settings update restores header");
 const idEn = await settle(capturedExport.SessionIdAction, { ...idProps, t: tEn });
 assert(findFirstElement(idEn, n => n.type === "button").props.title.startsWith(tEn("sessionId.copy")), "English copy label");
 assert(await settle(capturedExport.SessionIdAction, { ...idProps, sessionId: "" }) === null, "missing ID hidden");
 console.log("✓ SessionId: defaults, validation, full copy, failure fallback, live toggle and i18n");
 console.log("\n✅ ALL TESTS PASSED");
+
+for (const [tree, translate] of [[rtaZh, tZh], [rtaEn, tEn]]) {
+  assert(renderTree(tree).join(" ").includes(translate("action.short")), "regenerate has a visible text label");
+  assert(tree.props.title === translate("action.help"), "regenerate tooltip explains title replacement");
+}
+for (const translate of [tZh, tEn]) {
+  fakeScopeSnapshot = { status: "ready", writable: true, value: { enabled: true }, user: {} };
+  let lock = await settle(capturedExport.LockTitleAction, { scope, sessionId: "explain-lock", t: translate });
+  assert(renderTree(lock).join(" ").includes(translate("lock.short")), "unlocked title has visible action text");
+  assert(lock.props.title === translate("lock.help"), "lock tooltip explains scope");
+  fakeScopeSnapshot = { ...fakeScopeSnapshot, user: { lockedSessionIds: ["explain-lock"] } };
+  lock = await settle(capturedExport.LockTitleAction, { scope, sessionId: "explain-lock", t: translate });
+  assert(renderTree(lock).join(" ").includes(translate("lock.active")), "locked title has visible state text");
+  assert(lock.props.title === translate("lock.unlockHelp"), "locked title tooltip explains unlocking");
+  const settings = await settle(capturedExport.SettingsSection, { scope, t: translate });
+  const text = renderTree(settings).join(" ");
+  assert(text.includes(translate("settings.headerActions")) && text.includes(translate("settings.lockBoundary")), "settings explain header actions and lock boundaries");
+}
+console.log("✓ header actions: visible bilingual labels, detailed tooltips and settings help");
+
+// One explicit save batches independent edits and retains drafts on failure.
+fakeScopeSnapshot = { status: "ready", writable: true, value: { enabled: true }, user: {} };
+const unifiedProps = { scope, t: tZh };
+let unifiedTree = await settle(capturedExport.SettingsSection, unifiedProps);
+const writesBefore = scopeMutations.length;
+findFirstElement(unifiedTree, n => n.props?.id === "sst-titleLanguage").props.onChange({ target: { value: "en" } });
+findFirstElement(unifiedTree, n => n.props?.id === "sst-maxCharacters").props.onChange({ target: { value: "30" } });
+unifiedTree = await flush(capturedExport.SettingsSection, unifiedProps, unifiedTree);
+assert(scopeMutations.length === writesBefore, "edits remain local before Save");
+assert(findFirstElement(unifiedTree, n => n.props?.id === "sst-titleLanguage").props.value === "en", "draft select reflects unsaved edit");
+const realUnifiedMutate = scope.mutate;
+scope.mutate = async () => { throw new Error("test write failure"); };
+await findFirstElement(unifiedTree, n => n.props?.className === "sst-save-route").props.onClick();
+unifiedTree = await flush(capturedExport.SettingsSection, unifiedProps, unifiedTree);
+assert(findFirstElement(unifiedTree, n => n.props?.id === "sst-maxCharacters").props.value === "30", "failed save retains numeric draft");
+scope.mutate = realUnifiedMutate;
+await findFirstElement(unifiedTree, n => n.props?.className === "sst-save-route").props.onClick();
+assert(scopeMutations.length === writesBefore + 1, "one save writes one mutation");
+assert(scopeMutations.at(-1).some(op => op.path[0] === "titleLanguage") && scopeMutations.at(-1).some(op => op.path[0] === "maxTitleCharacters"), "one mutation contains both edits");
+console.log("✓ unified save: local drafts, atomic mutation, failure retention and retry");

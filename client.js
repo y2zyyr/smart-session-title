@@ -50,7 +50,7 @@ window.__ModuleLoader__.load({
      * The two are kept in sync deliberately: `validation/verify-i18n.mjs`
      * fails when this string and package.json's `version` drift apart.
      */
-    var PLUGIN_VERSION = "0.5.0-rc.6";
+    var PLUGIN_VERSION = "0.5.0-rc.7";
 
     /**
      * Where the batch block remembers its automatic-fallback checkbox. It is a
@@ -106,6 +106,15 @@ window.__ModuleLoader__.load({
       "lock.failed": "锁定状态保存失败",
       // Settings nav label -----------------------------------------
       "nav": "智能会话标题",
+      "action.short": "重新生成标题",
+      "lock.short": "锁定标题",
+      "lock.active": "标题已锁定",
+      "action.help": "用当前标题设置重新生成此会话的标题，会覆盖人工修改的标题；不会刷新或重新运行对话。",
+      "lock.help": "阻止本插件自动生成、手动重新生成和批量修改此标题；不会锁定对话，仍可聊天和人工改名。",
+      "lock.unlockHelp": "解除标题锁定，允许本插件再次生成或批量修改此标题。",
+      "settings.headerActions": "使用说明",
+      "settings.lockBoundary": "标题锁定不影响 DSH 的兜底标题或人工改名。锁定后，先解锁才能重新生成标题。",
+
       "settings.saving": "保存中…",
       "settings.saved": "已保存",
       "settings.preferences": "标题设置",
@@ -123,7 +132,7 @@ window.__ModuleLoader__.load({
       "settings.unavailable": "当前浏览器中无法使用此设置。",
       "settings.loading": "正在加载…",
       "settings.enabled": "AI 标题生成",
-      "settings.subtitle": "选择标题使用的模型，调整生成规则。普通设置自动保存。",
+      "settings.subtitle": "修改后点击「保存设定」生效。",
       "settings.defaultLength": "默认字数",
       "settings.characterUnit": "字",
       "settings.defaultParameters": "默认超时与重试",
@@ -144,8 +153,8 @@ window.__ModuleLoader__.load({
       "settings.manualModelHint": "该 Provider 未在此列出模型，请直接填写模型 ID。",
       "settings.directoryUnavailable": "无法读取 DSH 的模型目录，请手动填写 Provider 与模型 ID。",
       "settings.configuredNotice": "压缩后的首条提示将发送给所选 Provider。",
-      "settings.configuredUnsaved": "尚未生效：选择 Provider 和模型后，点击「保存固定模型」。",
-      "settings.saveRoute": "保存固定模型",
+      "settings.configuredUnsaved": "选择 Provider 和模型后，点击「保存设定」生效。",
+      "settings.saveRoute": "保存设定",
       "settings.invalidNumber": "请输入范围内的整数：",
       "settings.saveFailed": "设置保存失败。请检查填写内容与 DSH 日志。",
       "settings.disabledNote": "AI 标题已关闭。DSH 仍会根据首条提示设置 fallback 标题，人工重命名不受影响。",
@@ -255,6 +264,15 @@ window.__ModuleLoader__.load({
       "lock.failed": "Could not save the lock state",
       // Settings nav label -----------------------------------------
       "nav": "Smart Session Title",
+      "action.short": "Regenerate title",
+      "lock.short": "Lock title",
+      "lock.active": "Title locked",
+      "action.help": "Generate a new title using the current title settings, replacing manual titles too. Does not refresh or rerun the conversation.",
+      "lock.help": "Prevent automatic, manual and batch title generation by this plugin. You can still chat and rename the conversation yourself.",
+      "lock.unlockHelp": "Unlock this title to allow generation and batch retitling again.",
+      "settings.headerActions": "Usage guide",
+      "settings.lockBoundary": "Title locking does not affect DSH fallback titles or manual renaming. Unlock before regenerating a title.",
+
       // Settings page ----------------------------------------------
       "settings.saving": "Saving\u2026",
       "settings.saved": "Saved",
@@ -293,7 +311,7 @@ window.__ModuleLoader__.load({
       "settings.directoryUnavailable": "Could not read the DSH model directory; enter the provider and model IDs manually.",
       "settings.configuredNotice": "The compressed first prompt is sent to this provider.",
       "settings.configuredUnsaved": "Not saved yet: choose a provider and model, then click \"Save configured model\".",
-      "settings.saveRoute": "Save configured model",
+      "settings.saveRoute": "Save settings",
       "settings.invalidNumber": "Enter an integer in this range:",
       "settings.saveFailed": "Settings could not be saved. Check the values and DSH logs.",
       "settings.disabledNote": "AI titles are off. DSH still sets a fallback title from your first prompt, and manual renames are unaffected.",
@@ -618,6 +636,46 @@ window.__ModuleLoader__.load({
 .sst-batch-help[open] summary { margin-bottom: 8px; }
 .sst-settings [role=alert] { border-left: 3px solid #e6a872; padding: 8px 12px; margin: 0; }
 @media (max-width: 640px) { .sst-model-card { grid-template-columns: minmax(0, 1fr); } .sst-settings .sst-shape { grid-template-columns: minmax(0, 1fr); } .sst-settings .sst-card { padding: 14px; } }
+/* Compact settings: labels on the left, controls on the right. */
+.sst-settings { max-width: 640px; padding-top: 0; }
+.sst-page-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.sst-page-heading h2 { font-size: 17px; margin: 0; }
+.sst-page-heading > label { margin: 0 !important; font-size: 12px; flex-shrink: 0; }
+.sst-section { padding: 14px 0; }
+.sst-settings legend { font-size: 12px !important; margin-bottom: 10px !important; color: var(--dsw-alias-label-tertiary); }
+.sst-model-card { gap: 8px 12px; }
+.sst-model-card > div { display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: center; gap: 8px; grid-column: 1 / -1; }
+.sst-model-card > div label { margin: 0 !important; }
+.sst-model-card select, .sst-model-card input:not([type="radio"]):not([type="checkbox"]) { width: 100% !important; }
+.sst-model-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.sst-model-toolbar .sst-mode { margin: 0 !important; min-width: 0; }
+.sst-model-toolbar .sst-mode legend { float: left; margin: 0 10px 0 0 !important; align-self: center; }
+.sst-model-toolbar > button { margin-left: auto; flex-shrink: 0; }
+.sst-mode { display: flex; flex-wrap: wrap; gap: 6px; }
+.sst-mode > label { margin: 0 !important; padding: 0 10px !important; height: 28px; min-height: 28px; white-space: nowrap; flex: 0 0 auto; line-height: 1; }
+.sst-mode input[type="radio"] { width: 13px !important; height: 13px; min-height: 0; margin: 0; flex: 0 0 13px; }
+.sst-settings .sst-shape { gap: 9px; }
+.sst-content-fields, .sst-date-fields { display: flex; flex-direction: column; gap: 9px; }
+.sst-content-fields > div, .sst-date-fields > div { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(130px, 220px); align-items: center; gap: 14px; }
+.sst-content-fields label, .sst-date-fields label { margin: 0 !important; }
+.sst-settings #sst-maxCharacters { width: 90px !important; justify-self: end; }
+.sst-exclusions { border: 0; padding-top: 4px; }
+.sst-exclusions textarea { min-height: 58px; padding: 6px 9px; margin-bottom: 5px; }
+.sst-settings .sst-card { border: 0; border-radius: 0; border-top: 1px solid var(--dsw-alias-border-l4); padding: 11px 0; margin: 0; }
+.sst-settings .sst-card > summary { font-size: 12px; }
+.sst-card > summary .sst-batch-summary { display: inline; margin-left: 10px; }
+.sst-save-status { font-size: 12px; margin: 0; color: var(--dsw-alias-label-tertiary); }
+.sst-save-status:empty { display: none; }
+.sst-usage-help { padding: 10px 0; }
+.sst-usage-help p { font-size: 12px; color: var(--dsw-alias-label-tertiary); line-height: 1.6; }
+.sst-usage-help h4 { font-size: 12px; margin: 12px 0 4px; }
+.sst-batch-entry { padding: 12px 0 0; }
+@container sst-settings (max-width: 340px) {
+ .sst-page-heading { align-items: flex-start; flex-direction: column; }
+ .sst-content-fields > div, .sst-date-fields > div { grid-template-columns: 1fr; gap: 4px; }
+ .sst-settings #sst-maxCharacters { justify-self: start; }
+}
+
 `;
 
     var settingsWrites = new WeakMap();
@@ -1221,12 +1279,16 @@ window.__ModuleLoader__.load({
       // The shipped affordance: 28px round, transparent, tertiary label colour,
       // hover background, 0.45 opacity while disabled.
       var style = {
-        width: 28,
+        width: "auto",
+        gap: 5,
+        fontSize: 12,
+        whiteSpace: "nowrap",
         height: 28,
-        padding: 0,
+        padding: "0 8px",
         border: "none",
-        borderRadius: 999,
-        display: "grid",
+        borderRadius: 6,
+        display: "inline-flex",
+        alignItems: "center",
         placeItems: "center",
         flex: "none",
         background: hovered && !busy ? "var(--dsw-alias-interactive-bg-hover)" : "transparent",
@@ -1241,7 +1303,7 @@ window.__ModuleLoader__.load({
         disabled: busy,
         "aria-busy": busy ? "true" : undefined,
         "aria-label": label,
-        title: state === "error" ? t("action.failed") : label,
+        title: state === "error" ? t("action.failed") : busy ? label : t("action.help"),
         onClick: onClick,
         onMouseEnter: function () {
           setHovered(true);
@@ -1249,7 +1311,7 @@ window.__ModuleLoader__.load({
         onMouseLeave: function () {
           setHovered(false);
         },
-        children: jsxRuntime.jsx(primitives.IconRefreshOutline16, {})
+        children: [jsxRuntime.jsx(primitives.IconRefreshOutline16, {}), react.createElement("span", {}, t("action.short"))]
       });
     }
 
@@ -1352,12 +1414,16 @@ window.__ModuleLoader__.load({
       // Shares the shipped header affordance's metrics with the regenerate button
       // beside it — 28px round, transparent, tertiary label colour, hover wash.
       var style = {
-        width: 28,
+        width: "auto",
+        gap: 5,
+        fontSize: 12,
+        whiteSpace: "nowrap",
         height: 28,
-        padding: 0,
+        padding: "0 8px",
         border: "none",
-        borderRadius: 999,
-        display: "grid",
+        borderRadius: 6,
+        display: "inline-flex",
+        alignItems: "center",
         placeItems: "center",
         flex: "none",
         background: hovered && !busy ? "var(--dsw-alias-interactive-bg-hover)" : "transparent",
@@ -1374,7 +1440,7 @@ window.__ModuleLoader__.load({
         disabled: busy,
         "aria-pressed": locked ? "true" : "false",
         "aria-label": label,
-        title: label,
+        title: failed ? label : t(locked ? "lock.unlockHelp" : "lock.help"),
         onClick: function () {
           setFailed(false);
           setPending(true);
@@ -1397,7 +1463,7 @@ window.__ModuleLoader__.load({
         onMouseLeave: function () {
           setHovered(false);
         },
-        children: lockGlyph(locked)
+        children: [lockGlyph(locked), react.createElement("span", {}, t(locked ? "lock.active" : "lock.short"))]
       });
     }
 
@@ -1759,16 +1825,45 @@ window.__ModuleLoader__.load({
       var setCatalog = catalogPair[1];
       var workspacePair = react.useState(false);
       var statusPair = react.useState("");
+      var pendingRef = react.useRef({});
+      var pendingPair = react.useState({});
+      var savingPair = react.useState(false);
+      var invalidRef = react.useRef({});
       function save(ops) {
+        ops.forEach(function (op) { pendingRef.current[op.path[0]] = op; });
+        pendingPair[1](Object.assign({}, pendingRef.current));
         setError("");
+        statusPair[1]("");
+        return Promise.resolve();
+      }
+      function submitSettings() {
+        if (savingPair[0]) return;
+        var invalid = Object.values(invalidRef.current)[0];
+        if (invalid) { setError(invalid); return; }
+        var ops = Object.values(pendingRef.current);
+        var mode = draft.mode || (snap.user || {}).mode || (snap.value || {}).mode || "current-session";
+        if (mode === "configured") {
+          var provider = String(draft.provider !== undefined ? draft.provider : (snap.value || {}).provider || "").trim();
+          var model = String(draft.model !== undefined ? draft.model : (snap.value || {}).model || "").trim();
+          if (!provider || !model) { setError(t("settings.configuredUnsaved")); return; }
+          ops = ops.filter(function (op) { return ["mode", "provider", "model"].indexOf(op.path[0]) === -1; });
+          ops.push({ op: "set", path: ["mode"], value: mode }, { op: "set", path: ["provider"], value: provider }, { op: "set", path: ["model"], value: model });
+        }
+        if (!ops.length) return;
+        setError("");
+        savingPair[1](true);
         statusPair[1](t("settings.saving"));
         return persistSettings(scope, ops).then(function () {
+          pendingRef.current = {};
+          pendingPair[1]({});
+          setDraft({});
+          setExclusionDraft(undefined);
+          setSnap(scope.getSnapshot());
           statusPair[1](t("settings.saved"));
         }).catch(function () {
           statusPair[1]("");
-          setDraft({});
           setError(t("settings.saveFailed"));
-        });
+        }).finally(function () { savingPair[1](false); });
       }
 
 
@@ -1833,9 +1928,14 @@ window.__ModuleLoader__.load({
         });
       }
 
-      var value = snap.value || {};
-      var user = snap.user || {};
-      var busy = !snap.writable;
+      var value = Object.assign({}, snap.value || {});
+      var user = Object.assign({}, snap.user || {});
+      Object.values(pendingPair[0]).forEach(function (op) {
+        var field = op.path[0];
+        if (op.op === "unset") { delete value[field]; delete user[field]; }
+        else { value[field] = op.value; user[field] = op.value; }
+      });
+      var busy = !snap.writable || savingPair[0];
       // The exclusion list as persisted, used both by the textarea's initial text
       // and by the collapsed summary.
       var savedExclusions = Array.isArray(user.titleExclusions) ? user.titleExclusions : [];
@@ -1873,11 +1973,13 @@ window.__ModuleLoader__.load({
         if (raw !== "" && limits[field]) {
           var parsed = Number(raw);
           if (!Number.isInteger(parsed) || parsed < limits[field][0] || parsed > limits[field][1]) {
-            setError(t("settings.invalidNumber") + " " + limits[field][0] + "–" + limits[field][1]);
+            invalidRef.current[field] = t("settings.invalidNumber") + " " + limits[field][0] + "–" + limits[field][1];
+            setError(invalidRef.current[field]);
             return;
           }
           raw = parsed;
         }
+        delete invalidRef.current[field];
         return save([raw === "" ? { op: "unset", path: [field] } : { op: "set", path: [field], value: raw }]);
       }
 
@@ -1895,6 +1997,7 @@ window.__ModuleLoader__.load({
        */
       var EXCLUSION_LIMITS = { maxTerms: 50, maxCharacters: 64 };
       function writeExclusions(text) {
+        delete invalidRef.current.titleExclusions;
         var terms = [];
         var seen = {};
         var lines = String(text).split("\n");
@@ -1902,6 +2005,7 @@ window.__ModuleLoader__.load({
           var trimmed = lines[index].trim();
           if (trimmed === "" || seen[trimmed] === true) continue;
           if (Array.from(trimmed).length > EXCLUSION_LIMITS.maxCharacters) {
+            invalidRef.current.titleExclusions = t("settings.invalidExclusions");
             setError(t("settings.invalidExclusions"));
             return undefined;
           }
@@ -1909,6 +2013,7 @@ window.__ModuleLoader__.load({
           terms.push(trimmed);
         }
         if (terms.length > EXCLUSION_LIMITS.maxTerms) {
+          invalidRef.current.titleExclusions = t("settings.invalidExclusions");
           setError(t("settings.invalidExclusions"));
           return undefined;
         }
@@ -1992,12 +2097,7 @@ window.__ModuleLoader__.load({
                     writeField("mode", mode);
                     return;
                   }
-                  // "Configured" needs both halves, so it is persisted atomically
-                  // WITH them. When a usable pair already exists (saved earlier, or
-                  // just picked from the dropdowns) apply it now — otherwise the
-                  // radio looks like it took effect while generations keep using
-                  // each session's own logged model. With no pair yet, the block
-                  // below says explicitly that the save button is still required.
+                  // Stage the complete route; only the unified Save action writes it.
                   var pendingProvider = (draft.provider !== undefined ? draft.provider : (value.provider || "")).trim();
                   var pendingModel = (draft.model !== undefined ? draft.model : (value.model || "")).trim();
                   if (pendingProvider !== "" && pendingModel !== "") {
@@ -2176,20 +2276,10 @@ window.__ModuleLoader__.load({
       }
 
 
-      if (effectiveMode === "configured") {
-        var providerId = (draft.provider !== undefined ? draft.provider : (value.provider || "")).trim();
-        var modelId = (draft.model !== undefined ? draft.model : (value.model || "")).trim();
-        children.push(react.createElement("button", {
-          key: "save-route", className: "sst-save-route", type: "button", disabled: busy || !providerId || !modelId || (chosenMode === "configured" && providerId === value.provider && modelId === value.model),
-          onClick: function () {
-            save([
-              { op: "set", path: ["provider"], value: providerId },
-              { op: "set", path: ["model"], value: modelId },
-              { op: "set", path: ["mode"], value: "configured" }
-            ]);
-          }
-        }, t("settings.saveRoute")));
-      }
+      var saveButton = react.createElement("button", {
+        className: "sst-save-route", type: "button", disabled: busy,
+        onClick: submitSettings
+      }, t("settings.saveRoute"));
 
 
       if (effectiveMode === "disabled" || !enabled) {
@@ -2207,7 +2297,7 @@ window.__ModuleLoader__.load({
       // Title shape and content: the code-point cap, the optional date affix, the
       // phrasing/language preferences, and the exclusion words. All of them are
       // read by the host half on the NEXT generation, so there is nothing to save
-      // explicitly — the same immediate-write contract as the fields above.
+      // until the unified Save action submits the staged fields.
       // The date itself comes from the session's creation time, which is why
       // this block offers no date picker: there is nothing for the user to pick.
       var exclusionsText = exclusionDraft !== undefined ? exclusionDraft : savedExclusions.join("\n");
@@ -2220,7 +2310,7 @@ window.__ModuleLoader__.load({
             { style: { fontWeight: 500, marginBottom: 4, padding: 0, fontSize: 13 } },
             t("settings.shapeLegend")
           ),
-          react.createElement("h4", { style: { margin: 0 } }, t("settings.expression")),
+
           react.createElement("div", { className: "sst-content-fields" },
           // Phrasing and language. Both are enums whose empty option is the unset
           // that follows the plugin default / the message's own language, so the UI
@@ -2266,7 +2356,7 @@ window.__ModuleLoader__.load({
             )
           ),
           ),
-          react.createElement("h4", { style: { margin: 0 } }, t("settings.lengthDate")),
+
           react.createElement("div", { className: "sst-date-fields" },
           react.createElement(
             "div",
@@ -2414,11 +2504,11 @@ window.__ModuleLoader__.load({
           t: t,
           batch: props.batch,
           listSessions: props.listSessions,
-          disabled: !enabled || value.mode === "disabled",
+          disabled: (snap.value || {}).enabled === false || (snap.value || {}).mode === "disabled",
           route: {
-            mode: value.mode || "current-session",
-            provider: value.provider || "",
-            model: value.model || ""
+            mode: (snap.value || {}).mode || "current-session",
+            provider: (snap.value || {}).provider || "",
+            model: (snap.value || {}).model || ""
           },
           // Provider directory: lets the list flag sessions whose logged model is
           // gone before the run instead of after it fails.
@@ -2433,56 +2523,42 @@ window.__ModuleLoader__.load({
       // Which build is loaded — the first thing a bug report needs.
       children.push(versionFooter(t));
 
-      // Summaries describe persisted settings, not an unsaved route draft.
-      var modelSummary = !enabled || value.mode === "disabled" ? t("settings.modeDisabled")
-        : value.mode === "configured" ? (value.provider || "—") + " / " + (value.model || "—")
-        : t("settings.modeCurrent");
-      // Phrasing and language come from the RAW user section (what the human
-      // actually chose) so the summary never claims a preference the user did not
-      // set: an absent value means "default" / "auto".
-      var styleSummary = user.titleStyle === "short-name" ? t("settings.styleShortName")
-        : user.titleStyle === "action-object" ? t("settings.styleActionObject")
-        : t("settings.styleDefault");
-      var languageSummary = user.titleLanguage === "zh" ? t("settings.languageZh")
-        : user.titleLanguage === "en" ? t("settings.languageEn")
-        : t("settings.languageAuto");
-      var shapeSummary = styleSummary + " · " + languageSummary + " · " +
-        (typeof value.maxTitleCharacters === "number"
-        ? String(value.maxTitleCharacters) + " " + t("settings.characterUnit") : t("settings.defaultLength")) + " · " +
-        (value.titleDatePosition === "prefix" ? t("settings.dateAffixPrefix")
-          : value.titleDatePosition === "suffix" ? t("settings.dateAffixSuffix") : t("settings.dateAffixOff")) +
-        (savedExclusions.length > 0 ? " · " + t("settings.exclusionsSummary") + " " + savedExclusions.length : "");
+      var shapeSummary = [
+        user.titleStyle === "short-name" ? t("settings.styleShortName") : t("settings.styleActionObject"),
+        user.titleLanguage === "zh" ? t("settings.languageZh") : user.titleLanguage === "en" ? t("settings.languageEn") : t("settings.languageAuto"),
+        typeof value.maxTitleCharacters === "number" ? value.maxTitleCharacters + " " + t("settings.characterUnit") : t("settings.defaultLength")
+      ].join(" · ");
       var advancedSummary = [
         typeof value.timeoutMs === "number" ? t("settings.timeout") + " " + value.timeoutMs : "",
         typeof value.maxAttempts === "number" ? t("settings.maxAttempts") + " " + value.maxAttempts : ""
       ].filter(Boolean).join(" · ") || t("settings.defaultParameters");
 
-      var example = t(user.titleStyle === "short-name" ? "settings.exampleShort" : "settings.exampleAction");
-      var exampleDate = user.titleDateFormat === "md" ? "09-14" : "2026-09-14";
-      if (user.titleDatePosition === "prefix") example = exampleDate + " · " + example;
-      if (user.titleDatePosition === "suffix") example += " · " + exampleDate;
       return react.createElement("div", { className: "sst-settings" },
         react.createElement("style", {}, SETTINGS_CSS),
         workspacePair[0] ? react.createElement("div", {},
           react.createElement("button", { type: "button", onClick: function () { workspacePair[1](false); } }, t("batch.back")),
           children[batchIndex]) : react.createElement("div", {},
           react.createElement("header", { className: "sst-page-heading" },
-            react.createElement("h2", {}, t("nav")), children[0],
-            react.createElement("p", {}, modelSummary + " · " + shapeSummary),
-            react.createElement("p", {}, t("settings.subtitle"))),
+            react.createElement("h2", {}, t("nav")), children[0]),
           error ? react.createElement("p", { role: "alert" }, error) : null,
-          react.createElement("p", { role: "status", "aria-live": "polite" }, statusPair[0]),
+          react.createElement("p", { className: "sst-save-status", role: "status", "aria-live": "polite" }, statusPair[0]),
           react.createElement("section", { className: "sst-section" },
-            react.createElement("div", { className: "sst-model-card" }, children.slice(1, shapeIndex))),
-          react.createElement("section", { className: "sst-section" }, children[shapeIndex],
-            react.createElement("aside", { className: "sst-preview" },
-              react.createElement("small", {}, t("settings.preview")), react.createElement("p", {}, example))),
+            react.createElement("div", { className: "sst-model-toolbar" }, children[1], saveButton),
+            react.createElement("div", { className: "sst-model-card" }, children.slice(2, shapeIndex).filter(function (child) { return (child.key || child.props.key) !== "privacy"; }))),
+          settingsDisclosure(t("settings.shapeLegend"), shapeSummary, children[shapeIndex]),
           react.createElement("section", { className: "sst-section" }, sessionIdSetting),
           settingsDisclosure(t("settings.advanced"), advancedSummary, children[advancedIndex]),
-          react.createElement("section", { className: "sst-section" },
-            react.createElement("h3", {}, t("batch.legend")),
-            react.createElement("p", {}, t("batch.summary")),
+          react.createElement("section", { className: "sst-batch-entry" },
             react.createElement("button", { type: "button", onClick: function () { workspacePair[1](true); } }, t("batch.open")))),
+        react.createElement("details", { className: "sst-usage-help" },
+          react.createElement("summary", {}, t("settings.headerActions")),
+          react.createElement("h4", {}, t("settings.modelHelp")),
+          react.createElement("p", {}, t("settings.configuredNotice")),
+          react.createElement("h4", {}, t("action.short")),
+          react.createElement("p", {}, t("action.help")),
+          react.createElement("h4", {}, t("lock.short")),
+          react.createElement("p", {}, t("lock.help")),
+          react.createElement("p", {}, t("settings.lockBoundary"))),
         children[batchIndex + 1]);
     }
 
