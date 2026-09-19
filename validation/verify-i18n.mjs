@@ -313,7 +313,10 @@ const fakeMirror = {
         value: {
           providers: {
             scnet: { models: [{ name: "DeepSeek-V4-Flash" }, { name: "DeepSeek-V4" }] },
-            "opencode-go": { models: [{ name: "GPT-5.1-Codex" }] }
+            "opencode-go": { models: [{ name: "GPT-5.1-Codex" }] },
+            // Records carrying BOTH an id and a display name, exactly like the
+            // real `commandcode` route. The id is the only servable handle.
+            commandcode: { models: [{ id: "deepseek/deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash" }] }
           }
         }
       },
@@ -331,6 +334,7 @@ const fakeRemote = {
       value: [
         { id: "scnet", name: "SCNet" },
         { id: "opencode-go", name: "OpenCode Go" },
+        { id: "commandcode", name: "commandCode" },
         { id: "deepseek", name: "DeepSeek" }
       ]
     }),
@@ -339,6 +343,7 @@ const fakeRemote = {
       value: [
         { provider: "scnet", displayName: "SCNet", settingsNs: "llm-pi-ai", settingsPath: ["providers", "scnet"] },
         { provider: "opencode-go", displayName: "OpenCode Go", settingsNs: "llm-pi-ai", settingsPath: ["providers", "opencode-go"] },
+        { provider: "commandcode", displayName: "commandCode", settingsNs: "llm-pi-ai", settingsPath: ["providers", "commandcode"] },
         { provider: "deepseek", displayName: "DeepSeek", settingsNs: "llm-deepseek", settingsPath: [] }
       ]
     })
@@ -632,6 +637,74 @@ if (modelValues.includes("DeepSeek-V3.1") || modelValues.includes("GPT-5.1-Codex
   throw new Error(`model dropdown leaked another provider's models: ${modelValues.join(", ")}`);
 }
 console.log("✓ configured mode: provider + model dropdowns from DSH directory");
+
+// ---- the model select stores the ID, never the display name --------------
+// Observed live on `commandcode`: id `deepseek/deepseek-v4.1-flash`, name
+// `DeepSeek V4.1 Flash`. The name had been saved, and every generation then
+// failed with a generic "upstream failure" while the adapter rejected the
+// value in ~8ms (`UNKNOWN_MODEL`) — so the option value must be the ID.
+fakeScopeSnapshot = {
+  status: "ready",
+  value: { enabled: true, mode: "configured", provider: "commandcode", model: "deepseek/deepseek-v4.1-flash" },
+  user: { mode: "configured", provider: "commandcode", model: "deepseek/deepseek-v4.1-flash" },
+  writable: true
+};
+const catalogTree = await settle(capturedExport.SettingsSection, {
+  scope, t: tEn, describe: describeFace, remote: fakeRemote
+});
+const catalogModelSelect = collectSelects(catalogTree)[1];
+const catalogOptionValues = catalogModelSelect.options.map((o) => o.value);
+if (!catalogOptionValues.includes("deepseek/deepseek-v4.1-flash")) {
+  throw new Error(`the model ID must be the option value: ${catalogOptionValues.join(", ")}`);
+}
+if (catalogOptionValues.includes("DeepSeek V4.1 Flash")) {
+  throw new Error(`a display name must never be an option value: ${catalogOptionValues.join(", ")}`);
+}
+const catalogOption = catalogModelSelect.options.find((o) => o.value === "deepseek/deepseek-v4.1-flash");
+if (catalogOption.text !== "DeepSeek V4.1 Flash · deepseek/deepseek-v4.1-flash") {
+  throw new Error(`the option label must pair the display name with the ID: ${catalogOption.text}`);
+}
+console.log("✓ configured mode: the model option value is the model ID");
+
+// ---- a saved display NAME is called out, with the repairable ID ----------
+fakeScopeSnapshot = {
+  status: "ready",
+  value: { enabled: true, mode: "configured", provider: "commandcode", model: "DeepSeek V4.1 Flash" },
+  user: { mode: "configured", provider: "commandcode", model: "DeepSeek V4.1 Flash" },
+  writable: true
+};
+const staleTree = await settle(capturedExport.SettingsSection, {
+  scope, t: tEn, describe: describeFace, remote: fakeRemote
+});
+const staleSelect = collectSelects(staleTree)[1];
+// The saved value must stay selectable (opening the page never drops it)...
+if (!staleSelect.options.map((o) => o.value).includes("DeepSeek V4.1 Flash")) {
+  throw new Error("a saved model must stay selectable even when it is not in the list");
+}
+// ...but the page must say it cannot be served, and name the right ID.
+const staleText = renderTree(staleTree).join(" ");
+if (!staleText.includes(tEn("settings.modelNotServed"))) {
+  throw new Error(`a stale saved model must be flagged: ${staleText}`);
+}
+if (!staleText.includes(tEn("settings.modelNotServedSuggestion") + "deepseek/deepseek-v4.1-flash")) {
+  throw new Error(`the stale hint must name the repairable model ID: ${staleText}`);
+}
+console.log("✓ configured mode: a saved display name is flagged with the model ID to pick");
+
+// ...the same hint must not appear for a route that IS servable.
+fakeScopeSnapshot = {
+  status: "ready",
+  value: { enabled: true, mode: "configured", provider: "commandcode", model: "deepseek/deepseek-v4.1-flash" },
+  user: { mode: "configured", provider: "commandcode", model: "deepseek/deepseek-v4.1-flash" },
+  writable: true
+};
+const freshTree = await settle(capturedExport.SettingsSection, {
+  scope, t: tEn, describe: describeFace, remote: fakeRemote
+});
+if (renderTree(freshTree).join(" ").includes(tEn("settings.modelNotServed"))) {
+  throw new Error("a servable saved model must not be flagged as stale");
+}
+console.log("✓ configured mode: no false stale warning for a servable model");
 
 // ---- namespace-keyed document layout (llm-deepseek) ----------------------
 fakeScopeSnapshot = {

@@ -151,6 +151,8 @@ window.__ModuleLoader__.load({
       "settings.selectProvider": "选择 Provider…",
       "settings.selectModel": "选择模型…",
       "settings.manualModelHint": "该 Provider 未在此列出模型，请直接填写模型 ID。",
+      "settings.modelNotServed": "⚠ 已保存的模型不在该 Provider 的模型列表中，生成会失败。请重新选择并保存。",
+      "settings.modelNotServedSuggestion": "应改选模型 ID：",
       "settings.directoryUnavailable": "无法读取 DSH 的模型目录，请手动填写 Provider 与模型 ID。",
       "settings.configuredNotice": "压缩后的首条提示将发送给所选 Provider。",
       "settings.configuredUnsaved": "选择 Provider 和模型后，点击「保存设定」生效。",
@@ -308,6 +310,8 @@ window.__ModuleLoader__.load({
       "settings.selectProvider": "Select a provider…",
       "settings.selectModel": "Select a model…",
       "settings.manualModelHint": "This provider lists no models here; enter the model ID directly.",
+      "settings.modelNotServed": "⚠ The saved model is not in this provider's model list, so generation fails. Re-select a model and save.",
+      "settings.modelNotServedSuggestion": "Select instead:",
       "settings.directoryUnavailable": "Could not read the DSH model directory; enter the provider and model IDs manually.",
       "settings.configuredNotice": "The compressed first prompt is sent to this provider.",
       "settings.configuredUnsaved": "Not saved yet: choose a provider and model, then click \"Save configured model\".",
@@ -1055,18 +1059,24 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Read the cross-namespace settings mirror into a provider -> model-name
-     * map, so the configured-mode selectors can offer the models the user has
-     * already registered in DSH's Models page instead of free-text IDs.
+     * Read the cross-namespace settings mirror into a provider -> model-ID map
+     * plus a provider -> ID -> display-name map, so the configured-mode
+     * selectors can offer the models the user has already registered in DSH's
+     * Models page instead of free-text IDs.
      *
      * Two document shapes are covered (both seen in real DSH deployments):
-     *   1. `<ns>.providers.<providerId>.models = [{ name, ... }]`  (llm-pi-ai)
-     *   2. `<ns>.models = [{ name, ... }]`                          (llm-deepseek)
+     *   1. `<ns>.providers.<providerId>.models = [{ id, name, ... }]`  (llm-pi-ai)
+     *   2. `<ns>.models = [{ id, name, ... }]`                          (llm-deepseek)
      * Form 2's provider id is resolved later through `listConfigurableProviders`
      * (settingsNs -> provider), so it is stored under a synthetic `ns:` key.
+     *
+     * The ID — never the display name — is what `ctx.llm.stream()` accepts and
+     * what `session.modelSelection` logs, so the ID is the only value a
+     * selector may store; the name exists purely as the option label.
      */
     function readProviderModels(describeSnapshot) {
       var byProvider = Object.create(null);
+      var labels = Object.create(null);
       var view = describeSnapshot && describeSnapshot.view;
       var namespaces = view && Array.isArray(view.namespaces) ? view.namespaces : [];
       for (var index = 0; index < namespaces.length; index += 1) {
@@ -1079,27 +1089,44 @@ window.__ModuleLoader__.load({
           for (var providerId of Object.keys(providers)) {
             var config = providers[providerId];
             var models = config && Array.isArray(config.models) ? config.models : [];
-            byProvider[providerId] = collectModelNames(models);
+            var collected = collectModels(models);
+            byProvider[providerId] = collected.ids;
+            labels[providerId] = collected.labels;
           }
         }
         if (Array.isArray(value.models)) {
-          byProvider["ns:" + ns] = collectModelNames(value.models);
+          var nsCollected = collectModels(value.models);
+          byProvider["ns:" + ns] = nsCollected.ids;
+          labels["ns:" + ns] = nsCollected.labels;
         }
       }
-      return byProvider;
+      return { byProvider: byProvider, labels: labels };
     }
 
-    /** Pull `name` strings out of a DSH model record list. */
-    function collectModelNames(models) {
-      var out = [];
+    /**
+     * Pull the canonical `id` out of a DSH model record list, remembering each
+     * record's display `name` for the option label.
+     *
+     * Storing the name instead of the id is a silent, total failure: a real
+     * deployment (`commandcode`, id `deepseek/deepseek-v4.1-flash`, name
+     * `DeepSeek V4.1 Flash`) rejected the name locally in ~8ms with
+     * `UNKNOWN_MODEL`, which surfaced only as a generic "upstream failure" on
+     * every generation. A record without an `id` (older/hand-written shapes)
+     * still falls back to its name so the entry stays selectable.
+     */
+    function collectModels(models) {
+      var ids = [];
+      var labels = Object.create(null);
       for (var index = 0; index < models.length; index += 1) {
         var model = models[index];
-        if (model !== null && typeof model === "object" &&
-            typeof model.name === "string" && model.name.length > 0) {
-          out.push(model.name);
-        }
+        if (model === null || typeof model !== "object") continue;
+        var name = typeof model.name === "string" && model.name.length > 0 ? model.name : undefined;
+        var id = typeof model.id === "string" && model.id.length > 0 ? model.id : name;
+        if (id === undefined) continue;
+        if (ids.indexOf(id) === -1) ids.push(id);
+        labels[id] = name === undefined ? id : name;
       }
-      return out;
+      return { ids: ids, labels: labels };
     }
 
     /**
@@ -1108,12 +1135,15 @@ window.__ModuleLoader__.load({
      *
      * @param remote - `ctx.remote` (llm directory methods).
      * @param describe - `ctx.settingsScope.describe()` mirror face.
-     * @returns a promise of `{ providers, byProvider, byNs }` where `providers`
-     *   is `[{ id, name }]`, `byProvider` maps provider id -> model names, and
-     *   `byNs` maps settings namespace -> provider id.
+     * @returns a promise of `{ providers, byProvider, byNs, labels }` where
+     *   `providers` is `[{ id, name }]`, `byProvider` maps provider id -> model
+     *   IDs, `byNs` maps settings namespace -> provider id, and `labels` maps
+     *   provider id -> model ID -> display name.
      */
     function loadModelCatalog(remote, describe) {
-      var byProvider = readProviderModels(describe.getSnapshot());
+      var mirror = readProviderModels(describe.getSnapshot());
+      var byProvider = mirror.byProvider;
+      var labels = mirror.labels;
       var llm = remote !== undefined && remote !== null ? remote.llm : undefined;
       if (llm === undefined ||
           typeof llm.listProviders !== "function" ||
@@ -1121,7 +1151,7 @@ window.__ModuleLoader__.load({
         // `remote.llm` was not granted (missing inject declaration) or this
         // host exposes a different surface: degrade to manual entry, and let
         // the caller surface the empty directory so the user knows why.
-        return Promise.resolve({ providers: [], byProvider: byProvider, byNs: {} });
+        return Promise.resolve({ providers: [], byProvider: byProvider, byNs: {}, labels: labels });
       }
       return Promise.all([
         Promise.resolve(llm.listProviders()),
@@ -1151,11 +1181,11 @@ window.__ModuleLoader__.load({
             }
           }
         }
-        return { providers: providers, byProvider: byProvider, byNs: byNs };
+        return { providers: providers, byProvider: byProvider, byNs: byNs, labels: labels };
       }).catch(function () {
         // Directory unavailable: keep the mirror-derived map; the section
         // still works through the manual-entry fallback.
-        return { providers: [], byProvider: byProvider, byNs: {} };
+        return { providers: [], byProvider: byProvider, byNs: {}, labels: labels };
       });
     }
 
@@ -1177,6 +1207,46 @@ window.__ModuleLoader__.load({
         if (byNs[ns] === providerId) return catalog.byProvider[key];
       }
       return [];
+    }
+
+    /** The id -> display-name map for one provider id, mirror layouts included. */
+    function modelLabelsForProvider(catalog, providerId) {
+      if (catalog === undefined || catalog === null || providerId === undefined || providerId === "") return undefined;
+      var labels = catalog.labels || {};
+      if (labels[providerId] !== undefined) return labels[providerId];
+      var byNs = catalog.byNs || {};
+      for (var key of Object.keys(labels)) {
+        if (key.indexOf("ns:") !== 0) continue;
+        if (byNs[key.slice(3)] === providerId) return labels[key];
+      }
+      return undefined;
+    }
+
+    /**
+     * The text one model option shows. The option's VALUE is always the model
+     * ID; a display name that differs from it is spelled out beside the ID, so
+     * a saved name that DSH cannot serve stays visibly distinct from the real
+     * entry instead of looking like the same choice.
+     */
+    function modelOptionLabel(catalog, providerId, modelId) {
+      var labels = modelLabelsForProvider(catalog, providerId);
+      var name = labels === undefined ? undefined : labels[modelId];
+      if (name === undefined || name === modelId) return modelId;
+      return name + " · " + modelId;
+    }
+
+    /**
+     * Reverse lookup for a saved value that resolved to nothing: a value equal
+     * to a display NAME is repairable by selecting that model's ID, so the
+     * settings hint can name the exact ID instead of only reporting a failure.
+     */
+    function modelIdForLabel(catalog, providerId, label) {
+      var labels = modelLabelsForProvider(catalog, providerId);
+      if (labels === undefined) return undefined;
+      for (var id of Object.keys(labels)) {
+        if (labels[id] === label && id !== label) return id;
+      }
+      return undefined;
     }
 
     /** Shared select styling, matching the text inputs' `fieldStyle`. */
@@ -2217,7 +2287,15 @@ window.__ModuleLoader__.load({
           )
         ];
         availableModels.forEach(function (model) {
-          modelChildren.push(react.createElement("option", { key: model, value: model }, model));
+          // `value` is the model ID — the only handle DSH accepts; the label may
+          // add the provider's display name (see `modelOptionLabel`).
+          modelChildren.push(
+            react.createElement(
+              "option",
+              { key: model, value: model },
+              modelOptionLabel(catalog, selectedProvider, model)
+            )
+          );
         });
         if (selectedModel !== "" && !modelKnown) {
           modelChildren.push(
@@ -2263,6 +2341,24 @@ window.__ModuleLoader__.load({
               "p",
               { key: "manual-model", style: Object.assign({ marginTop: 0, marginBottom: 12 }, hintStyle) },
               t("settings.manualModelHint")
+            )
+          );
+        }
+        // A saved value outside this provider's model list cannot be served: the
+        // observed cause is a display NAME saved where DSH expects the model ID,
+        // which fails every generation with an unhelpful "upstream failure".
+        // Say so here, and name the repairable ID when the value is a name.
+        if (selectedProvider !== "" && selectedModel !== "" &&
+            availableModels.length > 0 && !modelKnown) {
+          var suggestedModelId = modelIdForLabel(catalog, selectedProvider, selectedModel);
+          children.push(
+            react.createElement(
+              "p",
+              { key: "stale-model", role: "status", style: Object.assign({ marginTop: 0, marginBottom: 12 }, hintStyle) },
+              t("settings.modelNotServed") +
+                (suggestedModelId === undefined
+                  ? ""
+                  : " " + t("settings.modelNotServedSuggestion") + suggestedModelId)
             )
           );
         }

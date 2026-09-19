@@ -68,6 +68,39 @@ const req = (text, over = {}) => ({ session: { id: "s1", header: { createdAt: Da
   t("B2 throws TitleGenerationError", err?.name, "TitleGenerationError");
   t("B2 message mentions attempts", /no usable title after 2 attempt/.test(err.message), true);
 }
+// B3. an adapter failure snapshot must name its taxonomy, not just "upstream"
+// Live gap: `commandcode` had its display NAME saved where DSH expects the model
+// ID, so the adapter failed locally in ~8ms with `UNKNOWN_MODEL` — yet the UI and
+// the log both read only "model error: upstream failure", indistinguishable from
+// a real provider outage, and the 1s/8ms timing difference was the only clue.
+{
+  const calls = [];
+  const p = createSmartSessionTitleProvider(policyFor({ settings: { maxAttempts: 1 } }), mkDeps([
+    [{ blocks: [], finish: { kind: "error", failure: { message: "provider body text", code: "UNKNOWN_MODEL", status: 404 } } }]], calls));
+  let err; try { await p.generate(req("修复构建错误")); } catch (e) { err = e; }
+  t("B3 code and status reach the message",
+    err.message, "smart-session-title: no usable title after 1 attempt(s): smart-session-title: model error: upstream failure (code=UNKNOWN_MODEL, status=404)");
+  t("B3 provider text is never replayed", /provider body text/.test(err.message), false);
+  t("B3 one call", calls.length, 1);
+}
+// B3b. a malformed snapshot (no code) still fails, with a bare message.
+{
+  const calls = [];
+  const p = createSmartSessionTitleProvider(policyFor({ settings: { maxAttempts: 1 } }), mkDeps([
+    [{ blocks: [], finish: { kind: "error", failure: {} } }]], calls));
+  let err; try { await p.generate(req("修复构建错误")); } catch (e) { err = e; }
+  t("B3b a code-less snapshot adds no parenthetical",
+    err.message, "smart-session-title: no usable title after 1 attempt(s): smart-session-title: model error: upstream failure");
+  // A missing snapshot is a structural violation: non-retryable, so it surfaces
+  // on the first attempt instead of being wrapped by the exhaustion message.
+  err = undefined;
+  const absentCalls = [];
+  const p2 = createSmartSessionTitleProvider(policyFor(), mkDeps([[{ blocks: [], finish: { kind: "error" } }]], absentCalls));
+  try { await p2.generate(req("修复构建错误")); } catch (e) { err = e; }
+  t("B3b absent snapshot stays non-retryable",
+    [err.message, absentCalls.length],
+    ["smart-session-title: model error: unknown model error", 1]);
+}
 // C. cancellation mid-stream must not retry
 {
   const calls = []; const ac = new AbortController();
