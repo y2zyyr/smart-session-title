@@ -46,7 +46,7 @@ const req = (text, over = {}) => ({ session: { id: "s1", header: { createdAt: Da
   t("A messageSeqs", out.messageSeqs, [7]);
   t("A model echo", out.model, { provider: "p", model: "m" });
   t("A one call", calls.length, 1);
-  t("A purpose forwarded", [calls[0].purpose, calls[0].maxTokens, calls[0].sessionId], ["session-title", 96, "s1"]);
+  t("A purpose forwarded", [calls[0].purpose, calls[0].maxTokens, calls[0].sessionId], ["session-title", 1024, "s1"]);
   t("A signal present", typeof calls[0].signal?.aborted, "boolean");
   t("A provider passthrough is plugin-only (no HTTP client)", "fetch" in calls[0], false);
 }
@@ -118,8 +118,26 @@ const req = (text, over = {}) => ({ session: { id: "s1", header: { createdAt: Da
   let err; try { await p.generate(req("修复登录 bug")); } catch (e) { err = e; }
   t("F already-provider-titled abstains", [err?.abstentionReason, calls.length], ["already-provider-titled", 0]);
 }
-// G. protocol finishes are terminal (no retry)
-for (const kind of ["max-tokens", "tool-calls"]) {
+// G. output-budget finishes: no text is a budget problem (retried once), text is disobedience
+{
+  // G1: a reasoning model that spent the whole budget on thinking produced NO
+  // text block — worth the single retry, then a normal failure.
+  const calls = [];
+  const p = createSmartSessionTitleProvider(policyFor(), mkDeps([[{ blocks: [], finish: { kind: "max-tokens" } }]], calls));
+  let err; try { await p.generate(req("修复构建错误")); } catch (e) { err = e; }
+  t("G1 max-tokens without text retries", calls.length, 2);
+  t("G1 the retry keeps the configured budget", calls.map((c) => c.maxTokens), [1024, 1024]);
+  t("G1 finally fails with the real reason", [err?.name, /maxOutputTokens/.test(err?.message ?? "")], ["TitleGenerationError", true]);
+}
+{
+  // G2: text WAS produced, so the model ignored the one-line instruction. That is
+  // a protocol violation and stays terminal — a paragraph is never salvaged.
+  const calls = [];
+  const p = createSmartSessionTitleProvider(policyFor(), mkDeps([[{ blocks: [{ type: "text", text: "这是一个很长的解释" }], finish: { kind: "max-tokens" } }]], calls));
+  let err; try { await p.generate(req("修复构建错误")); } catch (e) { err = e; }
+  t("G2 max-tokens with text is terminal protocol", [err?.kind, err?.message, calls.length], ["protocol", "smart-session-title: title output reached maxOutputTokens", 1]);
+}
+for (const kind of ["tool-calls"]) {
   const calls = [];
   const p = createSmartSessionTitleProvider(policyFor(), mkDeps([[{ blocks: [], finish: { kind } }]], calls));
   let err; try { await p.generate(req("修复构建错误")); } catch (e) { err = e; }

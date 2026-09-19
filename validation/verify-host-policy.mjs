@@ -259,6 +259,10 @@ t("unknown config key throws", (() => { try { conf.resolveTitleConfig({nope:1});
 t("prepared > raw throws", (() => { try { conf.resolveTitleConfig({targetPreparedInputBytes: 99999}); return "no-throw"; } catch { return "throw"; } })(), "throw");
 t("maxAttempts 4 throws", (() => { try { conf.resolveTitleConfig({maxAttempts:4}); return "no-throw"; } catch { return "throw"; } })(), "throw");
 t("default timeout is 15000", conf.resolveTitleConfig({}).timeoutMs, 15000);
+// The default output ceiling must leave room for a reasoning model to finish
+// thinking AND emit the title; 96 tokens did not (see the max-tokens retry test).
+t("default maxOutputTokens leaves room for reasoning", conf.resolveTitleConfig({}).maxOutputTokens, 1024);
+t("maxOutputTokens stays overridable", conf.resolveTitleConfig({ maxOutputTokens: 256 }).maxOutputTokens, 256);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

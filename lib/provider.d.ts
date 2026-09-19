@@ -171,6 +171,12 @@ export type AttemptFailure = {
  *
  * Used to classify the diagnostics outcome (`timeout` -> `timed-out`) without
  * matching on message text.
+ *
+ * `protocol` is terminal (the model broke the one-line contract); `output`
+ * covers a retryable unusable answer. A `max-tokens` finish is `protocol` when
+ * the model did emit text and kept going, and `output` when it emitted NO text
+ * at all — that shape means the budget was spent on reasoning, so it gets the
+ * caller's single retry instead of failing outright.
  */
 export type TitleFailureKind = "timeout" | "cancelled" | "model" | "protocol" | "output" | "excluded";
 /** A provider failure that the service will log and swallow (fallback stays). */

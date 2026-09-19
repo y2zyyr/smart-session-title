@@ -1546,7 +1546,7 @@ for (const [label, raw] of [
 }
 // The shape fields are deliberately NOT merged into the composition config.
 const mergedConfig = settingsModule.applySettingsToTitleConfig(
-  { targetWords: 6, targetCjkCharacters: 12, maxRawInputBytes: 65536, targetPreparedInputBytes: 12000, codeBlockKeepBytes: 400, maxOutputTokens: 96, timeoutMs: 15000, maxAttempts: 2 },
+  { targetWords: 6, targetCjkCharacters: 12, maxRawInputBytes: 65536, targetPreparedInputBytes: 12000, codeBlockKeepBytes: 400, maxOutputTokens: 1024, timeoutMs: 15000, maxAttempts: 2 },
   shapeSettings
 );
 if ("maxTitleCharacters" in mergedConfig || "titleDatePosition" in mergedConfig) {

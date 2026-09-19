@@ -22,6 +22,14 @@ export interface TitleConfig {
     readonly targetPreparedInputBytes: number;
     /** A fenced code block larger than this is replaced by a placeholder. */
     readonly codeBlockKeepBytes: number;
+    /**
+     * Output ceiling for ONE title call, default 1024.
+     *
+     * Generous on purpose: a title costs a handful of tokens, so this only
+     * bounds a runaway answer — but a reasoning model bills its thinking
+     * against the same budget, and the original 96 made such models return
+     * `max-tokens` with no title text at all.
+     */
     readonly maxOutputTokens: number;
     readonly timeoutMs: number;
     /** Total attempts = 1 initial + (maxAttempts - 1) retries. */

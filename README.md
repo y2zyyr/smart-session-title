@@ -399,7 +399,12 @@ Private development reports, session records, and local test fixtures are exclud
 
 - **REASONING_CONTROL_UNAVAILABLE_CONFIRMED:** there is no uniform cross-adapter
   reasoning-disable control. The plugin inherits adapter defaults instead of forcing `off`.
-- Some reasoning models can exhaust the 96-token output budget; fallback remains intact.
+- A reasoning model's thinking is billed against the same output budget: the old
+  96-token cap made them return `max-tokens` with no title text at all. The
+  default is now `maxOutputTokens: 1024`, and a `max-tokens` finish with **no
+  text block** is treated as budget starvation and retried once. A model that did
+  emit text and kept going is still a terminal protocol failure — its paragraph
+  is never salvaged into a title.
 - Configured mode picks the provider and model from those already registered
   in DSH, and falls back to manual IDs when a provider lists no models. Settings
   and header copy follow the DSH UI language (zh/en dictionaries; other
@@ -440,6 +445,10 @@ The short-command tests cover both sides: a session made only of `继续写` / `
 still abstains with zero model calls on an automatic schedule, while an explicit
 `/retitle` generates from the newest one and overrides a manual title — and a
 noise-only session (greeting, URL, code) still abstains even for `/retitle`.
+The output-budget tests cover both sides too: a `max-tokens` finish with **no text
+block** is retried once (asserting both calls carry the configured `maxTokens`),
+while a `max-tokens` finish **with** a text block stays a terminal protocol
+failure after a single call.
 
 The settings page uses four collapsible cards: model, title shape and content, advanced parameters, and batch retitling.
 All four sections start collapsed and show concise saved-setting summaries;

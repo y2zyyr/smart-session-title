@@ -34,6 +34,11 @@
         targetPreparedInputBytes: 12000
         # A fenced code block larger than this is replaced by a placeholder.
         codeBlockKeepBytes: 400
-        maxOutputTokens: 96
+        # Output ceiling for ONE title call. Generous on purpose: reasoning
+        # models (MiMo, DeepSeek V4 Flash) spend this budget on their thinking
+        # before any title text, and the old 96-token cap made them return
+        # `max-tokens` with nothing usable. A normal title still emits ~10
+        # tokens; this only bounds a runaway answer, it is not a cost knob.
+        maxOutputTokens: 1024
         timeoutMs: 15000
         maxAttempts: 2
