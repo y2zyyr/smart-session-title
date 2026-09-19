@@ -132,6 +132,11 @@ export interface ProviderDependencies {
      * session-keyed flag is the minimum seam that lets an explicit request
      * override the automatic churn guard. It carries no scheduling authority and
      * is consumed once.
+     *
+     * It also unlocks the weak-prompt fallback: with the flag set and no
+     * task-bearing message in the session, the provider titles from the newest
+     * short imperative ("继续写" / "发布") instead of abstaining. An automatic
+     * schedule passes no flag and keeps the filter exactly as before.
      */
     readonly consumeExplicitRegeneration?: ((sessionId: string) => boolean) | undefined;
     /** Local outcome counters, if the plugin is collecting them. */

@@ -51,6 +51,18 @@ const sel = policy.selectTaskTarget([{text:"你好",seq:1},{text:"看看这个",
 t("target is first meaningful", sel.target.seq, 3);
 t("weakCount", sel.weakCount, 2);
 
+// --- explicit /retitle fallback: a session of terse commands is still titleable on demand
+const shortCmds = [{text:"继续写",seq:1},{text:"发布",seq:2},{text:"继续写",seq:3}];
+t("short commands are weak for automatic titling", policy.selectTaskTarget(shortCmds).target, undefined);
+t("all three are too-short-no-signal", policy.selectTaskTarget(shortCmds).weakReasons, ["too-short-no-signal","too-short-no-signal","too-short-no-signal"]);
+t("explicit fallback takes the NEWEST short command", policy.selectExplicitFallbackTarget(shortCmds).seq, 3);
+t("explicit fallback skips a leading greeting", policy.selectExplicitFallbackTarget([{text:"你好",seq:1},{text:"继续写",seq:2}]).seq, 2);
+t("explicit fallback refuses pure noise", policy.selectExplicitFallbackTarget([
+  {text:"你好",seq:1},{text:"https://example.com/a/b",seq:2},{text:"/workspace/example/x",seq:3},
+  {text:"```js\nconst a=1;\n```",seq:4},{text:"。。。",seq:5},{text:"看看这个",seq:6}
+]), undefined);
+t("explicit fallback is not a second-chance for task messages", policy.selectExplicitFallbackTarget([{text:"修复登录 bug",seq:1}]), undefined);
+
 // --- route table
 t("enabled=false -> abstain disabled", route.resolveTitleRoute({enabled:false}).reason, "disabled");
 t("mode=disabled -> abstain disabled", route.resolveTitleRoute({enabled:true,mode:"disabled"}).reason, "disabled");

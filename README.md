@@ -17,7 +17,9 @@ No separate model setup is required.
 - Compresses oversized and code-heavy prompts instead of rejecting them.
 - Waits for a meaningful task when a conversation starts with a greeting.
 - Protects manual titles and prevents automatic title drift.
-- Provides `/retitle` and a header button for explicit regeneration.
+- Provides `/retitle` and a header button for explicit regeneration; an explicit
+  request also outranks the weak-prompt filter, so a session whose messages are
+  only terse commands (`继续写` / `发布`) can still be retitled.
 - **Title shape and content**: a character cap, an optional date affix, a title
   **style** (default / short task name / action + object) and a **language**
   (auto / Chinese / English).
@@ -311,6 +313,12 @@ When AI titles are disabled, `/retitle` returns `AI title generation is disabled
 without a model call. A third party calling bare `refresh()` does not receive the
 plugin's explicit permission token for replacing a manual title.
 
+**Explicit `/retitle` outranks the weak-prompt filter.** When no message names a
+task — typically a writing-mode session whose only human messages are terse
+commands such as `继续写` or `发布` — `/retitle` generates from the **newest** such
+command instead of failing. Automatic scheduling keeps the filter unchanged:
+greetings, bare URLs, paths, code-only and punctuation-only prompts still abstain.
+
 ## Weak first prompts
 
 `Hello → Thanks → Are you there? → Help me audit database performance` spends no
@@ -321,6 +329,9 @@ automatically receive titles.
 The policy reads messages and titles replayed by Core, rather than maintaining its
 own history. Reopening a greeting-only session after a real process restart and
 sending a meaningful task has been verified through the Web UI.
+`/retitle` is an explicit request and relaxes exactly one weak shape: the newest
+short imperative becomes an eligible source. Every other weak shape (greeting,
+bare URL/path/code, punctuation-only, demonstrative) still abstains even then.
 
 ## Privacy
 
@@ -425,6 +436,10 @@ The lock tests cover all four entry points: the provider abstains AND does not
 consume the `/retitle` permission, the command handler refuses, the header button
 disables itself with the reason, and the batch list drops locked rows so that even
 "Select all" cannot reach them.
+The short-command tests cover both sides: a session made only of `继续写` / `发布`
+still abstains with zero model calls on an automatic schedule, while an explicit
+`/retitle` generates from the newest one and overrides a manual title — and a
+noise-only session (greeting, URL, code) still abstains even for `/retitle`.
 
 The settings page uses four collapsible cards: model, title shape and content, advanced parameters, and batch retitling.
 All four sections start collapsed and show concise saved-setting summaries;

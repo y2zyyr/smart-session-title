@@ -184,6 +184,20 @@ export interface TaskTargetSelection {
  * the task, and an automatic re-title on every later turn is out of scope.
  */
 export declare function selectTaskTarget(messages: readonly HumanMessage[]): TaskTargetSelection;
+/**
+ * Pick a title source for an EXPLICIT `/retitle` when no message names a task.
+ *
+ * The weak-prompt filter protects *automatic* titling from noise; an explicit
+ * `/retitle` outranks it. This fallback accepts the one weak shape that still
+ * carries intent — a short imperative such as "继续写" or "发布", rejected by
+ * {@link assessPrompt} only for having no action verb, latin text or technical
+ * signal — and returns the NEWEST match, because that is what the user is acting
+ * on now. Pure noise (empty, greeting, demonstrative, URL/path/code/punctuation
+ * only) still yields undefined, so a contentless session keeps abstaining.
+ *
+ * Only consulted when {@link selectTaskTarget} found no target.
+ */
+export declare function selectExplicitFallbackTarget(messages: readonly HumanMessage[]): HumanMessage | undefined;
 export type TitleRejectReason = "empty" | "placeholder" | "generic" | "url" | "path" | "code" | "too-long" | "no-letters";
 export type TitleValidation = {
     readonly ok: true;

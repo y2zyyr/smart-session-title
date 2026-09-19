@@ -35,7 +35,7 @@ const policyFor = (over = {}) => {
   return () => ({ config: settings.applySettingsToTitleConfig(conf.resolveTitleConfig(over.config ?? {}), s), settings: s });
 };
 const req = (text, over = {}) => ({ session: { id: "s1", header: { createdAt: Date.UTC(2026, 8, 13, 4), ...(over.header ?? {}) } },
-  messages: [{ text, seq: 7 }], route: { provider: "p", model: "m" }, signal: over.signal ?? new AbortController().signal });
+  messages: over.messages ?? [{ text, seq: 7 }], route: { provider: "p", model: "m" }, signal: over.signal ?? new AbortController().signal });
 
 // A. happy path
 {
@@ -152,6 +152,48 @@ for (const kind of ["max-tokens", "tool-calls"]) {
   const p = createSmartSessionTitleProvider(policyFor({ settings: { maxAttempts: 1 } }), mkDeps([[{ blocks: [], finish: { kind: "error", failure: {} } }]], calls));
   try { await p.generate(req("修复构建错误")); } catch {}
   t("J settings maxAttempts wins over row config", calls.length, 1);
+}
+// K. explicit /retitle tolerates a session of terse commands (只有「继续写」「发布」的会话)
+const SHORT_CMDS = [{ text: "继续写", seq: 1 }, { text: "发布", seq: 2 }, { text: "继续写", seq: 3 }];
+{
+  // K1: the AUTOMATIC schedule keeps abstaining — the weak filter is unchanged there.
+  const calls = [];
+  const p = createSmartSessionTitleProvider(policyFor(), mkDeps([[{ blocks: [{ type: "text", text: "续写" }], finish: { kind: "stop" } }]], calls));
+  let err; try { await p.generate(req("", { messages: SHORT_CMDS })); } catch (e) { err = e; }
+  t("K1 automatic schedule on short commands abstains", [err?.name, err?.abstentionReason, calls.length], ["TitleAbstention", "no-meaningful-prompt", 0]);
+}
+{
+  // K2: `/retitle` generates from the NEWEST short command instead of failing.
+  const calls = [];
+  const deps = mkDeps([[{ blocks: [{ type: "text", text: "续写章节" }], finish: { kind: "stop" } }]], calls);
+  deps.consumeExplicitRegeneration = () => true;
+  const p = createSmartSessionTitleProvider(policyFor(), deps);
+  const out = await p.generate(req("", { messages: SHORT_CMDS }));
+  const sent = calls[0]?.messages?.[0]?.content?.[0]?.text ?? "";
+  t("K2 explicit /retitle generates", out.title, "续写章节");
+  t("K2 newest short command is the source", out.messageSeqs, [3]);
+  t("K2 model saw the newest text only", [sent.includes("继续写"), sent.includes("发布")], [true, false]);
+  t("K2 exactly one model call", calls.length, 1);
+}
+{
+  // K3: a session made of greetings/urls/code stays refused even for `/retitle`.
+  const calls = [];
+  const deps = mkDeps([[{ blocks: [{ type: "text", text: "问候" }], finish: { kind: "stop" } }]], calls);
+  deps.consumeExplicitRegeneration = () => true;
+  const p = createSmartSessionTitleProvider(policyFor(), deps);
+  let err; try { await p.generate(req("", { messages: [{ text: "你好", seq: 1 }, { text: "看看这个", seq: 2 }] })); } catch (e) { err = e; }
+  t("K3 noise-only session still abstains for /retitle", [err?.abstentionReason, calls.length], ["no-meaningful-prompt", 0]);
+}
+{
+  // K4: the fallback is resolved before the explicit-only title gates, so
+  // `/retitle` still overrides a hand-set title on a command-only session.
+  const calls = [];
+  const deps = mkDeps([[{ blocks: [{ type: "text", text: "续写章节" }], finish: { kind: "stop" } }]], calls);
+  deps.consumeExplicitRegeneration = () => true;
+  deps.readTitle = () => ({ source: { kind: "user" }, title: "我自己的标题" });
+  const p = createSmartSessionTitleProvider(policyFor(), deps);
+  const out = await p.generate(req("", { messages: SHORT_CMDS }));
+  t("K4 fallback still overrides a manual title on /retitle", out.title, "续写章节");
 }
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
