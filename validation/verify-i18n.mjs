@@ -479,6 +479,23 @@ if (capturedExport.PLUGIN_VERSION !== manifestVersion) {
   );
 }
 console.log(`✓ PLUGIN_VERSION matches package.json (${manifestVersion})`);
+const packageJson = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf-8"));
+for (const peer of [
+  "@deepseek-ai/dsh-llm",
+  "@deepseek-ai/dsh-session-title",
+  "@deepseek-ai/dsh-settings"
+]) {
+  const range = packageJson.peerDependencies?.[peer];
+  if (range !== "^0.1.5-rc.1 || ^0.2.0-rc.1") {
+    throw new Error(`${peer} peer range must include official Core 0.2.0-rc.1 (got ${JSON.stringify(range)})`);
+  }
+}
+for (const readme of ["README.md", "README.zh-CN.md"]) {
+  if (!readFileSync(join(ROOT, readme), "utf-8").includes(manifestVersion)) {
+    throw new Error(`${readme} does not mention package version ${manifestVersion}`);
+  }
+}
+console.log("✓ package peer ranges admit official Core 0.2.0-rc.1 and both READMEs match the release version");
 console.log("✓ exports verified");
 
 // The remote.llm namespace MUST be declared, or DSH never grants it and the
@@ -520,8 +537,9 @@ console.log(
   `✓ settings.section label thunk follows the language (zh="${labelValue}" en="${labelValueEn}")`
 );
 
-// Core 0.2 replaces settingsScope with configForms. Verify the same settings
-// card mounts in the Plugins page and receives its DSH-owned form controller.
+// Core 0.2 replaces settingsScope with configForms. An installed third-party
+// bundle configures itself through the keyed package-detail slot and receives
+// its DSH-owned form controller.
 const core02SlotRegistrations = [];
 const core02ConfigForm = fakeCtx.settingsScope.bind();
 const core02ConfigForms = {
@@ -551,20 +569,20 @@ const core02Ctx = {
 };
 capturedApply(core02Ctx);
 const core02SettingsSlot = core02SlotRegistrations.find(
-  (registration) => registration.name === "plugins.item" && registration.id === "smart-session-title"
+  (registration) => registration.name === "plugins.bundle.config" && registration.key === "smart-session-title"
 );
-if (!core02SettingsSlot) throw new Error("Core 0.2 Plugins settings card was not registered");
-if (core02SettingsSlot.locale !== "smart-session-title" || typeof core02SettingsSlot.label !== "function") {
-  throw new Error("Core 0.2 Plugins settings card is missing its locale or label thunk");
+if (!core02SettingsSlot) throw new Error("Core 0.2 installed-bundle settings page was not registered");
+if (core02SettingsSlot.locale !== "smart-session-title" || core02SettingsSlot.id !== undefined) {
+  throw new Error("Core 0.2 bundle config must use its package key and locale");
 }
 const core02SettingsFace = core02SettingsSlot.inject();
 if (core02SettingsFace.scope !== core02ConfigForm ||
     typeof core02SettingsFace.scope.getSnapshot !== "function" ||
     typeof core02SettingsFace.scope.mutate !== "function" ||
     typeof core02SettingsFace.scope.subscribe !== "function") {
-  throw new Error("Core 0.2 Plugins card did not receive a ConfigForms controller");
+  throw new Error("Core 0.2 bundle page did not receive a ConfigForms controller");
 }
-console.log("✓ Core 0.2 configForms mounts the settings card in Plugins");
+console.log("✓ Core 0.2 configForms mounts settings on the installed bundle page");
 
 const headerAction = slotRegistrations.find((r) => r.id === "smart-session-title-regenerate");
 if (!headerAction) throw new Error("header action registration missing");

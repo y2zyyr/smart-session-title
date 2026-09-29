@@ -3,7 +3,7 @@
 English | [简体中文](README.zh-CN.md)
 
 Smarter automatic session titles for **DeepSeek Harness (DSH)**.
-**0.5.0-rc.8 — release candidate**, intended for the npm `next` tag.
+**0.5.0-rc.10 — release candidate**, intended for the npm `next` tag.
 
 
 The settings page now shows model and title rules directly, with advanced options collapsed and visible save feedback. Batch optimization has a separate workspace with automatic loading, title/ID search, and back navigation. Batch routing reflects saved settings; fixed-model mode hides redundant automatic fallback. Date format appears only when a date affix is enabled.
@@ -90,12 +90,14 @@ its replacement patch active does not restore the built-in provider.
 
 The last live installation and startup verification used **DSH Desktop 2.0.9**,
 **Core 0.1.5-rc.1**, **Cordis 4.0.2**, **Schemastery 3.18.2**, and **Node ≥22.15.0**.
-The current local DSH Desktop 2.0.9 `app.asar` provides **Core 0.2.0-rc.2**,
-**Cordis 4.0.4**, and **Schemastery 3.18.4**. The plugin's required runtime API
-contracts were checked against that bundle, but the plugin has not yet had a
-live startup verification on Core 0.2.0-rc.2. Peer ranges cover both cohorts:
-`^0.1.5-rc.1 || ^0.2.0-rc.2` for DSH runtime packages and `~3.18.2` for
-Schemastery. Other Core versions have not been verified.
+The official `deepseek-harness` **v0.2.0-rc.1** release and its matching
+registry packages use Core **0.2.0-rc.1**. The current local DSH Desktop 2.0.9
+`app.asar` provides Core **0.2.0-rc.2**, **Cordis 4.0.4**, and
+**Schemastery 3.18.4**. The plugin's required contracts were checked against
+the official `rc.1` documentation and the local `rc.2` bundle, but it has not
+yet had a live startup verification on Core 0.2. Peer ranges cover both Core
+generations: `^0.1.5-rc.1 || ^0.2.0-rc.1` for DSH runtime packages and
+`~3.18.2` for Schemastery. Other Core versions have not been verified.
 
 Startup checks the title and LLM services, then validates settings before the
 provider is registered. Core 0.1 uses `settings.register` and `settingsScope`;
@@ -105,8 +107,9 @@ is used.
 
 ## Settings
 
-Open **Settings → Smart Session Title** on Core 0.1, or **Plugins → Smart Session
-Title** on Core 0.2. Core 0.1 persists the `smart-session-title` namespace in
+Open **Settings → Smart Session Title** on Core 0.1. On Core 0.2, open
+**Plugins → Installed → smart-session-title**; its settings appear on the
+package detail page. Core 0.1 persists the `smart-session-title` namespace in
 **`$DSH_HOME/settings.yaml`**. Core 0.2 stores the same fields in this plugin's
 volatile Config in the active DSH profile. Both use DSH's own atomic writes,
 revisions, and change notifications. Changes affect the next generation; an

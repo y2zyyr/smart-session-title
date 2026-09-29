@@ -50,7 +50,7 @@ window.__ModuleLoader__.load({
      * The two are kept in sync deliberately: `validation/verify-i18n.mjs`
      * fails when this string and package.json's `version` drift apart.
      */
-    var PLUGIN_VERSION = "0.5.0-rc.8";
+    var PLUGIN_VERSION = "0.5.0-rc.10";
 
     /**
      * Where the batch block remembers its automatic-fallback checkbox. It is a
@@ -1731,18 +1731,13 @@ window.__ModuleLoader__.load({
         return Promise.resolve(sessionRemote.list({}));
       }
 
-      // Core 0.1 renders an owned Settings section; Core 0.2 mounts owned plugin
-      // cards and exposes only the volatile fields of this bundle's Config.
-      // Both use the same settings component and form controller contract.
+      // Core 0.1 renders an owned Settings section. Core 0.2 renders this
+      // installed bundle's settings on its package detail page via the keyed
+      // plugins.bundle.config slot. Both use the same component and form face.
       function registerSettingsPage(slotName) {
         return ctx.slots.inject(slotName, function () {
           var options = {
             name: slotName,
-            id: "smart-session-title",
-            order: 30,
-            label: function () {
-              return ctx.locale.bind(NS)("nav");
-            },
             locale: NS,
             inject: function () {
               return {
@@ -1754,13 +1749,25 @@ window.__ModuleLoader__.load({
               };
             }
           };
+          if (slotName === "plugins.bundle.config") {
+            // Third-party bundles configure themselves on their installed
+            // package detail page; `plugins.item` is reserved for official
+            // plugins listed in the Official group.
+            options.key = "smart-session-title";
+          } else {
+            options.id = "smart-session-title";
+            options.order = 30;
+            options.label = function () {
+              return ctx.locale.bind(NS)("nav");
+            };
+          }
           return ctx.slots.register(options, SettingsSection);
         });
       }
       if (useConfigForms && typeof configForms.whileServed === "function") {
         ctx.effect(function () {
           return configForms.whileServed([NS], function () {
-            return registerSettingsPage("plugins.item");
+            return registerSettingsPage("plugins.bundle.config");
           });
         }, "smart-session-title: config settings page");
       } else if (settingsScope !== undefined && settingsScope !== null) {
@@ -1870,8 +1877,8 @@ window.__ModuleLoader__.load({
     exports.isLockedIn = isLockedIn;
     exports.isAiDisabledSnapshot = isAiDisabledSnapshot;
     /**
-     * Settings page component — `settings.section` on Core 0.1 and
-     * `plugins.item` on Core 0.2.
+     * Settings page component — `settings.section` on Core 0.1 and the
+     * installed bundle's `plugins.bundle.config` page on Core 0.2.
      *
      * Receives `scope` through the slot's `inject` face: a bound
      * shared settings form exposing `getSnapshot()`, `set(field, value)`

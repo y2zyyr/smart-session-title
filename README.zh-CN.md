@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-DeepSeek Harness 会话智能标题插件。**0.5.0-rc.8 — 发布候选版本**，npm 标签为 `next`。
+DeepSeek Harness 会话智能标题插件。**0.5.0-rc.10 — 发布候选版本**，npm 标签为 `next`。
 
 ## 功能
 
@@ -61,7 +61,7 @@ npm install smart-session-title@next --legacy-peer-deps
 ## 兼容性
 
 上一次完成真实安装与启动验证的环境：DSH Desktop **2.0.9**、Core **0.1.5-rc.1**、Cordis **4.0.2**、Schemastery **3.18.2**，Node **≥22.15.0**。
-当前本机 DSH Desktop 2.0.9 的 `app.asar` 提供 Core **0.2.0-rc.2**、Cordis **4.0.4**、Schemastery **3.18.4**。已对照该 bundle 检查本插件所需的运行时 API 契约，但尚未在 Core 0.2.0-rc.2 上完成插件启动验证。peerDependencies 同时覆盖两组环境：DSH 运行时包使用 `^0.1.5-rc.1 || ^0.2.0-rc.2`，Schemastery 使用 `~3.18.2`。
+官方 `deepseek-harness` **v0.2.0-rc.1** release 及其 registry packages 使用 Core **0.2.0-rc.1**。本机 DSH Desktop 2.0.9 的 `app.asar` 提供 Core **0.2.0-rc.2**、Cordis **4.0.4**、Schemastery **3.18.4**。已对照官方 `rc.1` 文档和本机 `rc.2` bundle 检查本插件所需的 API 契约，但尚未在 Core 0.2 上完成插件启动验证。peerDependencies 覆盖 Core 两代：DSH 运行时包使用 `^0.1.5-rc.1 || ^0.2.0-rc.1`，Schemastery 使用 `~3.18.2`。
 其他 Core 版本尚未验证。
 启动时检查 title service、LLM；注册 provider 前会验证设置。Core 0.1 使用
 `settings.register` / `settingsScope`；Core 0.2 使用 volatile plugin Config / `configForms`。
@@ -70,7 +70,7 @@ Web 端使用 DSH 原生 slots、locale 和 Remote commands。
 
 ## 设置
 
-Core 0.1 打开 **设置 → 智能会话标题**；Core 0.2 打开 **插件 → 智能会话标题**。
+Core 0.1 打开 **设置 → 智能会话标题**；Core 0.2 打开 **插件 → 已安装 → smart-session-title**，设置位于插件详情页。
 Core 0.1 通过 DSH 官方 settings service 写入 **`$DSH_HOME/settings.yaml` 的 `smart-session-title` namespace**；
 Core 0.2 将相同字段存入当前 DSH profile 中本插件的 volatile Config。两者都由 DSH 负责原子写入、revision 和变更通知。
 没有插件自建 sidecar、watcher 或 HTTP 服务。下一次生成实时使用新设置，当前进行中的请求保持开始时的配置。
