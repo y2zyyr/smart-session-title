@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-DeepSeek Harness 会话智能标题插件。**0.5.0-rc.7 — 发布候选版本**，npm 标签为 `next`。
+DeepSeek Harness 会话智能标题插件。**0.5.0-rc.8 — 发布候选版本**，npm 标签为 `next`。
 
 ## 功能
 
@@ -60,17 +60,20 @@ npm install smart-session-title@next --legacy-peer-deps
 
 ## 兼容性
 
-验证环境：DSH Desktop **2.0.9**、Core **0.1.5-rc.1**、Cordis **4.0.2**、Schemastery **3.18.2**，Node **≥22.15.0**。
-`dsh-llm`、`dsh-session-title`、`dsh-settings` 的 peerDependencies 使用兼容预发布版本的范围 `^0.1.5-rc.1`；Schemastery 保持精确版本 `3.18.2`。
-启动检查 title service、LLM、Settings 能力；非法设置在 provider 注册之前失败。
-Web 端需要 DSH 原生 slots、locale、settingsScope 和 Remote commands。
-其他 Core 版本尚未验证，不按版本字符串硬编码拒绝。
+上一次完成真实安装与启动验证的环境：DSH Desktop **2.0.9**、Core **0.1.5-rc.1**、Cordis **4.0.2**、Schemastery **3.18.2**，Node **≥22.15.0**。
+当前本机 DSH Desktop 2.0.9 的 `app.asar` 提供 Core **0.2.0-rc.2**、Cordis **4.0.4**、Schemastery **3.18.4**。已对照该 bundle 检查本插件所需的运行时 API 契约，但尚未在 Core 0.2.0-rc.2 上完成插件启动验证。peerDependencies 同时覆盖两组环境：DSH 运行时包使用 `^0.1.5-rc.1 || ^0.2.0-rc.2`，Schemastery 使用 `~3.18.2`。
+其他 Core 版本尚未验证。
+启动时检查 title service、LLM；注册 provider 前会验证设置。Core 0.1 使用
+`settings.register` / `settingsScope`；Core 0.2 使用 volatile plugin Config / `configForms`。
+Web 端使用 DSH 原生 slots、locale 和 Remote commands。
+插件不按版本字符串硬编码拒绝。
 
 ## 设置
 
-打开 **设置 → 智能会话标题**。配置通过 DSH 官方 `settingsScope` / Remote Settings 写入
-**`$DSH_HOME/settings.yaml` 的 `smart-session-title` namespace**；由 DSH 负责原子写入、revision 和文件 watcher。
-没有独立 JSON、sidecar、额外 watcher 或 HTTP 服务。下一次生成实时使用新设置，当前进行中的请求保持开始时的配置。
+Core 0.1 打开 **设置 → 智能会话标题**；Core 0.2 打开 **插件 → 智能会话标题**。
+Core 0.1 通过 DSH 官方 settings service 写入 **`$DSH_HOME/settings.yaml` 的 `smart-session-title` namespace**；
+Core 0.2 将相同字段存入当前 DSH profile 中本插件的 volatile Config。两者都由 DSH 负责原子写入、revision 和变更通知。
+没有插件自建 sidecar、watcher 或 HTTP 服务。下一次生成实时使用新设置，当前进行中的请求保持开始时的配置。
 设置页页脚显示当前插件版本。
 
 | 字段 | 默认 | 含义 |
@@ -154,7 +157,7 @@ fallback 标题留在侧栏上，而 fallback 正是取首条用户消息的开�
 - DSH 的 fallback 标题（**新会话在模型回答前显示的就是它**，取自首条消息原文）不受影响；
 - 你手动重命名的标题不受影响；
 - 对话原文当然不会被修改——发给主模型的对话内容与本设置无关；
-- 排除词表本身以明文存在 `settings.yaml` 里。
+- 排除词表本身以明文存在 DSH 管理的设置中：Core 0.1 是 `settings.yaml`，Core 0.2 是当前 profile 配置。
 
 因此它的准确名字是「标题排除词」，**不是隐私或脱敏功能**。它最实际的用途是配合**批量优化历史标题**，
 把一批历史标题里的名字一次性去掉。
@@ -173,7 +176,7 @@ fallback 标题留在侧栏上，而 fallback 正是取首条用户消息的开�
 | 批量列表排除锁定会话 | 列表不显示它们，并在计数旁显示「已跳过已锁定会话: N」 |
 | 批量运行覆盖不到它们 | 连「全选」也选不中锁定行 |
 
-- 锁定状态保存在**插件自己的 settings namespace**（`settings.yaml` 的 `lockedSessionIds`），
+- 锁定状态保存在**插件自己的 DSH 托管配置**（`lockedSessionIds`），
   **不是浏览器 localStorage**：换窗口、清浏览器数据、重启 DSH 后锁定都还在。
 - 没有「仍然包含」的覆盖开关——解锁是一个明确动作。这是刻意的：锁定若能被某个入口绕过就不叫锁定。
 - **锁不住的两件事**（与排除词同类的边界）：① 会话还没有标题时，DSH Core 仍会写入取自首条消息的
@@ -202,7 +205,7 @@ fallback 标题留在侧栏上，而 fallback 正是取首条用户消息的开�
   并给出数量：这些会话在「跟随当前会话模型」下必然失败。
 - **自动兜底**（默认关闭，需手动勾选）：已保存「指定模型」时，跑完一批后会用该路由**只重跑失败的会话一次**，
   结束后恢复原来的标题模式。重跑期间是一次真实的设置写入，因此默认不开启。
-  勾选状态记在浏览器本地存储，而不是 `settings.yaml`——那份 Schema 归 host 所有，客户端半不能扩展字段。
+  勾选状态记在浏览器本地存储，而不是会跨窗口和重启共享的 DSH 设置中；它只控制当前浏览器的批量行为。
 
 ## 模型模式
 
@@ -238,7 +241,7 @@ AI 关闭时 `/retitle` 返回 `AI title generation is disabled.`，不调用模
 configured 模式会把压缩后的首条有效任务发送给所选 provider，该 provider 可能不同于会话 provider。
 标题不会进入模型上下文；插件不额外保存 `session/title-llm-request` 提示副本。
 
-插件 Settings 只允许十三个声明字段，unknown-key guard 拒绝 `apiKey`、token、cookie、credential、secret、password 等未知字段。
+插件 Settings 只允许十四个声明字段，unknown-key guard 拒绝 `apiKey`、token、cookie、credential、secret、password 等未知字段。
 UI 只处理模型 ID 和运行参数，凭据完全由 DSH 管理。
 诊断不写完整 Prompt、完整模型响应或凭据；adapter 原始错误文本也不写入插件日志，避免错误回显敏感输入。
 

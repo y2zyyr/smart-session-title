@@ -3,7 +3,7 @@
 English | [简体中文](README.zh-CN.md)
 
 Smarter automatic session titles for **DeepSeek Harness (DSH)**.
-**0.5.0-rc.7 — release candidate**, intended for the npm `next` tag.
+**0.5.0-rc.8 — release candidate**, intended for the npm `next` tag.
 
 
 The settings page now shows model and title rules directly, with advanced options collapsed and visible save feedback. Batch optimization has a separate workspace with automatic loading, title/ID search, and back navigation. Batch routing reflects saved settings; fixed-model mode hides redundant automatic fallback. Date format appears only when a date affix is enabled.
@@ -88,21 +88,30 @@ its replacement patch active does not restore the built-in provider.
 
 ## Compatibility
 
-Validated with **DSH Desktop 2.0.9**, **Core 0.1.5-rc.1**, **Cordis 4.0.2**,
-**Schemastery 3.18.2**, and **Node ≥22.15.0**.
-DSH runtime peers use the prerelease-compatible range `^0.1.5-rc.1`; Schemastery remains pinned to `3.18.2`. Other Core versions have not been verified.
+The last live installation and startup verification used **DSH Desktop 2.0.9**,
+**Core 0.1.5-rc.1**, **Cordis 4.0.2**, **Schemastery 3.18.2**, and **Node ≥22.15.0**.
+The current local DSH Desktop 2.0.9 `app.asar` provides **Core 0.2.0-rc.2**,
+**Cordis 4.0.4**, and **Schemastery 3.18.4**. The plugin's required runtime API
+contracts were checked against that bundle, but the plugin has not yet had a
+live startup verification on Core 0.2.0-rc.2. Peer ranges cover both cohorts:
+`^0.1.5-rc.1 || ^0.2.0-rc.2` for DSH runtime packages and `~3.18.2` for
+Schemastery. Other Core versions have not been verified.
 
-Startup checks the title, LLM, and Settings capabilities. Invalid settings fail
-before the provider is registered. The Web client uses official slots, locale,
-settingsScope, and Remote commands. No version-string hard rejection is used.
+Startup checks the title and LLM services, then validates settings before the
+provider is registered. Core 0.1 uses `settings.register` and `settingsScope`;
+Core 0.2 uses volatile plugin Config and `configForms`. The Web client uses
+official slots, locale, and Remote commands. No version-string hard rejection
+is used.
 
 ## Settings
 
-Open **Settings → Smart Session Title**.
-The official DSH Settings service persists the `smart-session-title` namespace in
-**`$DSH_HOME/settings.yaml`**, handling atomic writes, revisions, and file watching.
-Changes affect the next generation; an in-flight request keeps its initial policy.
-There is no separate config file, custom watcher, or HTTP server.
+Open **Settings → Smart Session Title** on Core 0.1, or **Plugins → Smart Session
+Title** on Core 0.2. Core 0.1 persists the `smart-session-title` namespace in
+**`$DSH_HOME/settings.yaml`**. Core 0.2 stores the same fields in this plugin's
+volatile Config in the active DSH profile. Both use DSH's own atomic writes,
+revisions, and change notifications. Changes affect the next generation; an
+in-flight request keeps its initial policy. The plugin creates no sidecar file,
+custom watcher, or HTTP server.
 The footer of the page shows the loaded plugin version, so a bug report can name
 the exact build.
 
@@ -214,7 +223,8 @@ translation — add `客户甲`, `ClientA` and `甲方` separately.
 - titles you renamed by hand are not affected;
 - the conversation itself is never modified — what the main model receives is
   unrelated to this setting;
-- the term list itself is stored in plain text in `settings.yaml`.
+- the term list itself is stored in plain text in DSH-managed settings: `settings.yaml`
+  on Core 0.1 or the active profile configuration on Core 0.2.
 
 So its accurate name is "title exclusions", **not a privacy or redaction
 feature**. Its most practical use is alongside **Optimize past titles**, to strip
@@ -236,9 +246,9 @@ All four entry points honour it:
 | The batch list excludes locked sessions | they are not listed, and the count is joined by "Locked sessions skipped: N" |
 | A batch run cannot reach them | even "Select all" cannot select a locked row |
 
-- The lock lives in the plugin's **own settings namespace** (`lockedSessionIds` in
-  `settings.yaml`), **not in browser localStorage**: it survives a new window, a
-  cleared browser profile, and a DSH restart.
+- The lock lives in this plugin's **host-managed configuration** (`lockedSessionIds`),
+  **not in browser localStorage**: it survives a new window, a cleared browser
+  profile, and a DSH restart.
 - There is no "include anyway" override — unlocking is an explicit action. That is
   deliberate: a lock that one entry point can bypass is not a lock.
 - **Two things it cannot lock**, the same class of limit as the exclusion words:
@@ -287,8 +297,8 @@ filter for larger histories.
   a finished run retries exactly the failed sessions once on that configured
   route, then restores the previous title mode. The switch is a real settings
   write for the duration of the retry, so it stays off unless you ask for it.
-  The checkbox itself is remembered in browser storage, not in `settings.yaml`:
-  that schema is host-owned and the client half may not extend it.
+  The checkbox itself is remembered in browser storage, not in host-managed
+  settings: it only controls batch behavior in this browser.
 
 ## Model modes
 
@@ -341,7 +351,7 @@ first meaningful task to the explicitly selected provider, which may be differen
 
 Titles never enter model context. The plugin does not append an extra
 `session/title-llm-request` prompt copy to the session log.
-Only the thirteen declared Settings fields are accepted. Unknown credential-shaped
+Only the fourteen declared Settings fields are accepted. Unknown credential-shaped
 fields such as `apiKey`, token, cookie, credential, secret, and password are rejected.
 Credentials remain entirely managed by DSH.
 

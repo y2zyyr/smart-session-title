@@ -31,7 +31,8 @@ export declare const inject: string[];
 /** @see resolveTitleConfig — typed as unknown because the loader validates it at run time. */
 export declare const Config: unknown;
 /**
- * Settings schema for `$DSH_HOME/settings.yaml`.
+ * Settings schema for Core 0.1's `$DSH_HOME/settings.yaml` namespace.
+ * Core 0.2 stores the same user preferences in this plugin's volatile Config.
  *
  * Deliberately no `.default()` calls: an absent field means "the user has never
  * chosen", which is what lets `mode` fall back to the deployment's composed
@@ -41,7 +42,7 @@ export declare const Config: unknown;
  *
  * Unknown keys are NOT declared here. The schemastery schema merges extras
  * rather than rejecting them (`.strict()` is a zod feature), so the plugin
- * never writes one: its UI and write path only ever touch the six fields
+ * never writes one: its UI and write path only ever touch the fourteen fields
  * below, and a credential has no declared field to hide behind.
  */
 /** @see resolveTitleSettings — typed as unknown because the settings service validates it at run time. */
@@ -51,7 +52,7 @@ export declare const SettingsSchema: unknown;
 export declare const SETTINGS_BASE: Readonly<{
     enabled: true;
 }>;
-/** One namespace scope handed back by `settings.register`. */
+/** One namespace scope handed back by Core 0.1 `settings.register`. */
 export interface SettingsScope {
     get(): unknown;
     watch(callback: () => void): () => void;
@@ -59,10 +60,11 @@ export interface SettingsScope {
 }
 /** The settings service surface this plugin uses. */
 export interface SettingsService {
-    register(ns: string, schema: unknown, options?: {
+    register?(ns: string, schema: unknown, options?: {
         base?: Record<string, unknown>;
         validate?: (value: unknown) => void;
     }): SettingsScope;
+    configure?(presentation: { auto?: boolean }, owner?: unknown): unknown;
 }
 /** The slice of the Cordis context this plugin uses. */
 export interface SmartSessionTitleContext {

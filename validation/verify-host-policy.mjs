@@ -76,6 +76,10 @@ t("half-configured settings ignored", route.resolveTitleRoute({enabled:true,mode
 
 // --- capabilities
 t("caps ok", caps.findMissingCapabilities({sessionTitle:{register(){},refresh(){},get(){},rename(){}},llm:{stream(){}},settings:{register(){}}}), []);
+t("caps accept Core 0.2 volatile Config settings", caps.findMissingCapabilities(
+  {sessionTitle:{register(){},refresh(){},get(){},rename(){}},llm:{stream(){}}},
+  {enabled:{get(){ return true; }}}
+), []);
 t("caps missing", caps.findMissingCapabilities({}).length, 6);
 let threw = false; try { caps.assertTitleCapabilities({}); } catch { threw = true; }
 t("caps assert throws", threw, true);
@@ -121,6 +125,28 @@ t("suffix survives 80-byte cap", policy.byteLength(composed) <= 80 && composed.e
 
 // --- settings validation
 t("unknown key refused", (() => { try { settings.resolveTitleSettings({apiKey:"x"}); return "no-throw"; } catch { return "throw"; } })(), "throw");
+t("Core 0.2 volatile Config values resolve as settings", (() => {
+  const volatile = (value) => ({ get: () => value });
+  const resolved = settings.resolveTitleSettingsFromConfig({
+    enabled: volatile(false), mode: volatile("configured"),
+    provider: volatile("provider-id"), model: volatile("model-id"),
+    titleExclusions: volatile(["  Acme  ", "Acme"]), targetWords: volatile(6)
+  });
+  return [resolved.enabled, resolved.mode, resolved.provider, resolved.model, resolved.titleExclusions];
+})(), [false, "configured", "provider-id", "model-id", ["Acme"]]);
+t("Core 0.2 volatile settings are read at call time", (() => {
+  let enabled = true;
+  const resolved = () => settings.resolveTitleSettingsFromConfig({ enabled: { get: () => enabled } }).enabled;
+  const first = resolved(); enabled = false; return [first, resolved()];
+})(), [true, false]);
+t("Core 0.2 missing Config fields keep normal defaults", [
+  settings.resolveTitleSettingsFromConfig({}).enabled,
+  settings.resolveTitleSettingsFromConfig({}).mode
+], [true, undefined]);
+t("Core 0.2 Config rejects unknown credential keys", (() => {
+  try { settings.resolveTitleSettingsFromConfig({ apiKey: "must-not-be-accepted" }); return "no-throw"; }
+  catch { return "throw"; }
+})(), "throw");
 t("half route refused", (() => { try { settings.resolveTitleSettings({provider:"p"}); return "no-throw"; } catch { return "throw"; } })(), "throw");
 t("configured without pair refused", (() => { try { settings.resolveTitleSettings({mode:"configured"}); return "no-throw"; } catch { return "throw"; } })(), "throw");
 t("empty object -> enabled true, mode undefined", [settings.resolveTitleSettings({}).enabled, settings.resolveTitleSettings({}).mode], [true, undefined]);

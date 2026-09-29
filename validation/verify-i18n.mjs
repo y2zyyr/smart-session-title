@@ -520,6 +520,52 @@ console.log(
   `✓ settings.section label thunk follows the language (zh="${labelValue}" en="${labelValueEn}")`
 );
 
+// Core 0.2 replaces settingsScope with configForms. Verify the same settings
+// card mounts in the Plugins page and receives its DSH-owned form controller.
+const core02SlotRegistrations = [];
+const core02ConfigForm = fakeCtx.settingsScope.bind();
+const core02ConfigForms = {
+  get(entryId) {
+    if (entryId !== "smart-session-title") throw new Error(`unexpected config form id: ${entryId}`);
+    return core02ConfigForm;
+  },
+  describe: () => fakeCtx.settingsScope.describe(),
+  whileServed(entryIds, register) {
+    if (JSON.stringify(entryIds) !== JSON.stringify(["smart-session-title"])) {
+      throw new Error(`unexpected configForms.whileServed ids: ${JSON.stringify(entryIds)}`);
+    }
+    return register();
+  }
+};
+const core02Ctx = {
+  ...fakeCtx,
+  settingsScope: undefined,
+  configForms: core02ConfigForms,
+  slots: {
+    inject(name, factory) { factory(); },
+    register(meta, component) {
+      core02SlotRegistrations.push({ ...meta, component });
+      return () => {};
+    }
+  }
+};
+capturedApply(core02Ctx);
+const core02SettingsSlot = core02SlotRegistrations.find(
+  (registration) => registration.name === "plugins.item" && registration.id === "smart-session-title"
+);
+if (!core02SettingsSlot) throw new Error("Core 0.2 Plugins settings card was not registered");
+if (core02SettingsSlot.locale !== "smart-session-title" || typeof core02SettingsSlot.label !== "function") {
+  throw new Error("Core 0.2 Plugins settings card is missing its locale or label thunk");
+}
+const core02SettingsFace = core02SettingsSlot.inject();
+if (core02SettingsFace.scope !== core02ConfigForm ||
+    typeof core02SettingsFace.scope.getSnapshot !== "function" ||
+    typeof core02SettingsFace.scope.mutate !== "function" ||
+    typeof core02SettingsFace.scope.subscribe !== "function") {
+  throw new Error("Core 0.2 Plugins card did not receive a ConfigForms controller");
+}
+console.log("✓ Core 0.2 configForms mounts the settings card in Plugins");
+
 const headerAction = slotRegistrations.find((r) => r.id === "smart-session-title-regenerate");
 if (!headerAction) throw new Error("header action registration missing");
 if (headerAction.locale !== "smart-session-title")

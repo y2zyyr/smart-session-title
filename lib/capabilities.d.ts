@@ -24,7 +24,7 @@ export interface CapabilitySurface {
  * @param surface - the services `apply` received.
  * @returns one `ctx.<service>.<method>` label per missing method.
  */
-export declare function findMissingCapabilities(surface: CapabilitySurface): string[];
+export declare function findMissingCapabilities(surface: CapabilitySurface, config?: unknown): string[];
 /**
  * Fail loudly when this DSH core does not expose the API the plugin needs.
  *
@@ -35,4 +35,4 @@ export declare function findMissingCapabilities(surface: CapabilitySurface): str
  * @param surface - the services `apply` received.
  * @throws {Error} naming every missing method.
  */
-export declare function assertTitleCapabilities(surface: CapabilitySurface): void;
+export declare function assertTitleCapabilities(surface: CapabilitySurface, config?: unknown): void;

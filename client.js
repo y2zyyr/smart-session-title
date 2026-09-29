@@ -50,12 +50,13 @@ window.__ModuleLoader__.load({
      * The two are kept in sync deliberately: `validation/verify-i18n.mjs`
      * fails when this string and package.json's `version` drift apart.
      */
-    var PLUGIN_VERSION = "0.5.0-rc.7";
+    var PLUGIN_VERSION = "0.5.0-rc.8";
 
     /**
      * Where the batch block remembers its automatic-fallback checkbox. It is a
-     * UI preference, not plugin configuration: `settings.yaml` is a host-owned
-     * schema this client half may not extend, so it stays in the browser.
+     * UI preference, not plugin configuration: this checkbox only controls the
+     * current browser's batch behavior, so it stays in browser storage on both
+     * Core generations.
      */
     var BATCH_FALLBACK_STORAGE_KEY = "smart-session-title.batch.autoFallback";
 
@@ -767,7 +768,7 @@ window.__ModuleLoader__.load({
         ? current.concat([sessionId])
         : current.filter(function (id) { return id !== sessionId; });
       // An empty list is an unset, so an absent key keeps meaning "nothing locked"
-      // and settings.yaml never accumulates an empty array.
+      // and DSH's persistent configuration never accumulates an empty array.
       return persistSettings(
         scope,
         next.length === 0
@@ -1134,7 +1135,7 @@ window.__ModuleLoader__.load({
      * the model names already configured in DSH.
      *
      * @param remote - `ctx.remote` (llm directory methods).
-     * @param describe - `ctx.settingsScope.describe()` mirror face.
+     * @param describe - the shared settings/config describe mirror.
      * @returns a promise of `{ providers, byProvider, byNs, labels }` where
      *   `providers` is `[{ id, name }]`, `byProvider` maps provider id -> model
      *   IDs, `byNs` maps settings namespace -> provider id, and `labels` maps
@@ -1428,8 +1429,7 @@ window.__ModuleLoader__.load({
      * which is exactly why it cannot live in this window's storage: the whole
      * point is that a lock set here also holds in another window, after a browser
      * profile reset, and after a DSH restart. It therefore goes through the same
-     * settings scope the settings page uses (documented trade-off: the id list
-     * lives in `settings.yaml`, and a settings reset drops it).
+     * official settings/config form the page uses (a DSH profile reset drops it).
      *
      * The button shows the state itself: a closed padlock means locked, and the
      * label always names the action the click would perform.
@@ -1598,9 +1598,18 @@ window.__ModuleLoader__.load({
       // Stored-Session list for the batch optimizer (`session.list`); declaring
       // the namespace is what makes the Remote granted at all.
       "remote.session",
-      "locale",
-      "settingsScope"
+      "locale"
     ];
+
+    /** Read a service that is optional across DSH Core generations. */
+    function optionalService(ctx, name) {
+      try {
+        if (ctx !== undefined && ctx !== null && ctx[name] !== undefined) return ctx[name];
+        return ctx !== undefined && ctx !== null && typeof ctx.get === "function" ? ctx.get(name) : undefined;
+      } catch (error) {
+        return undefined;
+      }
+    }
 
     /**
      * Client plugin body: register dictionaries and the header action.
@@ -1623,7 +1632,19 @@ window.__ModuleLoader__.load({
       // header button; the host resumes each stored Session on demand.
       // The settings scope must exist before the fallback hook can use it (the
       // hook itself only runs once a batch has failures).
-      var settingsScope = ctx.settingsScope.bind({ namespace: NS });
+      // Core 0.1 exposes the legacy settingsScope service. Core 0.2 replaces it
+      // with ConfigForms: the same snapshot/write contract, keyed by this
+      // bundle's entry id, and a shared describe mirror for model discovery.
+      var legacySettings = optionalService(ctx, "settingsScope");
+      var configForms = optionalService(ctx, "configForms");
+      var useConfigForms = legacySettings === undefined && configForms !== undefined &&
+        typeof configForms.get === "function";
+      var settingsScope = legacySettings !== undefined && typeof legacySettings.bind === "function"
+        ? legacySettings.bind({ namespace: NS })
+        : useConfigForms ? configForms.get(NS) : undefined;
+      var settingsDescribe = legacySettings !== undefined && typeof legacySettings.describe === "function"
+        ? legacySettings.describe()
+        : useConfigForms && typeof configForms.describe === "function" ? configForms.describe() : undefined;
 
       var batch = createBatchController(
         function (sessionId, signal) {
@@ -1649,6 +1670,9 @@ window.__ModuleLoader__.load({
            * visible in the UI, never hidden.
            */
           runFallback: function (failures, runPass) {
+            if (settingsScope === undefined || settingsScope === null) {
+              return Promise.reject(new Error("title settings are not available"));
+            }
             var snapshot = settingsScope.getSnapshot();
             var value = snapshot !== undefined && snapshot !== null && snapshot.status === "ready"
               ? snapshot.value || {}
@@ -1707,18 +1731,15 @@ window.__ModuleLoader__.load({
         return Promise.resolve(sessionRemote.list({}));
       }
 
-      // The settings page binds this plugin's own namespace scope through the
-      // settings domain's base service — the documented route for a feature that
-      // owns a preference. (Bound above, because the batch fallback needs it too.)
-      ctx.slots.inject("settings.section", function () {
-        return ctx.slots.register(
-          {
-            name: "settings.section",
+      // Core 0.1 renders an owned Settings section; Core 0.2 mounts owned plugin
+      // cards and exposes only the volatile fields of this bundle's Config.
+      // Both use the same settings component and form controller contract.
+      function registerSettingsPage(slotName) {
+        return ctx.slots.inject(slotName, function () {
+          var options = {
+            name: slotName,
             id: "smart-session-title",
             order: 30,
-            // Locale-following nav label: the settings shell resolves label
-            // thunks through `resolveSlotLabel` and re-renders them when the
-            // active language (locale revision) changes.
             label: function () {
               return ctx.locale.bind(NS)("nav");
             },
@@ -1726,24 +1747,25 @@ window.__ModuleLoader__.load({
             inject: function () {
               return {
                 scope: settingsScope,
-                // Cross-namespace settings mirror — provides read access to
-                // every provider's model configuration for the configured-mode
-                // dropdown selectors.  The same shared mirror the Models page
-                // uses; subscribe to react to changes.
-                describe: ctx.settingsScope.describe(),
-                // Host remote — used to list registered LLM providers for the
-                // provider dropdown.
+                describe: settingsDescribe,
                 remote: ctx.remote,
-                // Batch optimizer: the plugin-scope runner (progress survives
-                // this page being closed) and the stored-Session reader.
                 batch: batch,
                 listSessions: listSessions
               };
             }
-          },
-          SettingsSection
-        );
-      });
+          };
+          return ctx.slots.register(options, SettingsSection);
+        });
+      }
+      if (useConfigForms && typeof configForms.whileServed === "function") {
+        ctx.effect(function () {
+          return configForms.whileServed([NS], function () {
+            return registerSettingsPage("plugins.item");
+          });
+        }, "smart-session-title: config settings page");
+      } else if (settingsScope !== undefined && settingsScope !== null) {
+        registerSettingsPage("settings.section");
+      }
 
       // Global progress + stop control. `shell.overlay` is the shipped root-scope
       // overlay layer, so the batch can be stopped from anywhere in the app —
@@ -1755,7 +1777,6 @@ window.__ModuleLoader__.load({
             name: "shell.overlay",
             id: "smart-session-title-batch",
             order: 20,
-            // Plain string: this slot renders components, never a projected label.
             label: "Batch retitle progress",
             locale: NS,
             inject: function () {
@@ -1849,10 +1870,11 @@ window.__ModuleLoader__.load({
     exports.isLockedIn = isLockedIn;
     exports.isAiDisabledSnapshot = isAiDisabledSnapshot;
     /**
-     * Settings section component — the `settings.section` page.
+     * Settings page component — `settings.section` on Core 0.1 and
+     * `plugins.item` on Core 0.2.
      *
      * Receives `scope` through the slot's `inject` face: a bound
-     * `SettingsScopeController` exposing `getSnapshot()`, `set(field, value)`
+     * shared settings form exposing `getSnapshot()`, `set(field, value)`
      * and `subscribe(listener)`. Every write goes through that public Remote;
      * the component never talks to a host API of its own.
      */

@@ -7,9 +7,10 @@
  * settings and the deployment's composition config — lives here so it is
  * directly unit-testable.
  *
- * The settings document is `$DSH_HOME/settings.yaml`, written through the
- * harness' own settings service (`ctx.settings.register`). This plugin stores
- * only provider and model IDENTIFIERS; credentials stay with DSH.
+ * Core 0.1 stores these values in `$DSH_HOME/settings.yaml` through
+ * `ctx.settings.register`; Core 0.2 exposes them as volatile plugin Config.
+ * This plugin stores only provider and model IDENTIFIERS; credentials stay with
+ * DSH.
  */
 import type { TitleConfig } from "./config.js";
 import type { AffixDateFormat, AffixPosition } from "./title-affix.js";
@@ -94,7 +95,7 @@ export declare const SETTINGS_BASE: {
 };
 /** Every key this plugin's settings may carry. Anything else is refused. */
 export declare const KNOWN_SETTINGS_KEYS: ReadonlySet<string>;
-/** Bounds that keep a hand-edited `settings.yaml` from producing nonsense. */
+/** Bounds that keep hand-edited DSH-managed settings from producing nonsense. */
 export declare const SETTINGS_LIMITS: Readonly<{
     timeoutMsMin: 1000;
     timeoutMsMax: 120000;
@@ -120,6 +121,11 @@ export declare const SETTINGS_LIMITS: Readonly<{
  * @throws {TypeError} on any out-of-range or inconsistent field.
  */
 export declare function resolveTitleSettings(raw: unknown): TitleSettings;
+/**
+ * Resolve user-facing settings from a plugin Config, reading Core 0.2 Volatile
+ * references at call time.
+ */
+export declare function resolveTitleSettingsFromConfig(config: unknown): TitleSettings;
 /**
  * Whether AI titles are off.
  *
