@@ -50,7 +50,7 @@ window.__ModuleLoader__.load({
      * The two are kept in sync deliberately: `validation/verify-i18n.mjs`
      * fails when this string and package.json's `version` drift apart.
      */
-    var PLUGIN_VERSION = "0.5.0-rc.13";
+    var PLUGIN_VERSION = "0.5.0-rc.14";
 
     /**
      * Where the batch block remembers its automatic-fallback checkbox. It is a
@@ -1382,7 +1382,7 @@ window.__ModuleLoader__.load({
         onMouseLeave: function () {
           setHovered(false);
         },
-        children: [jsxRuntime.jsx(primitives.IconRefreshOutline16, {}), react.createElement("span", {}, t("action.short"))]
+        children: [jsxRuntime.jsx(primitives.IconRefreshOutlineRegular, {}), react.createElement("span", {}, t("action.short"))]
       });
     }
 
@@ -1635,16 +1635,12 @@ window.__ModuleLoader__.load({
       // Core 0.1 exposes the legacy settingsScope service. Core 0.2 replaces it
       // with ConfigForms: the same snapshot/write contract, keyed by this
       // bundle's entry id, and a shared describe mirror for model discovery.
-      var legacySettings = optionalService(ctx, "settingsScope");
-      var configForms = optionalService(ctx, "configForms");
-      var useConfigForms = legacySettings === undefined && configForms !== undefined &&
-        typeof configForms.get === "function";
-      var settingsScope = legacySettings !== undefined && typeof legacySettings.bind === "function"
-        ? legacySettings.bind({ namespace: NS })
-        : useConfigForms ? configForms.get(NS) : undefined;
-      var settingsDescribe = legacySettings !== undefined && typeof legacySettings.describe === "function"
-        ? legacySettings.describe()
-        : useConfigForms && typeof configForms.describe === "function" ? configForms.describe() : undefined;
+      var legacySettings;
+      var configForms;
+      var useConfigForms = false;
+      var settingsScope;
+      var settingsDescribe;
+      var settingsIntegrationMounted = false;
 
       var batch = createBatchController(
         function (sessionId, signal) {
@@ -1731,9 +1727,9 @@ window.__ModuleLoader__.load({
         return Promise.resolve(sessionRemote.list({}));
       }
 
-      // Core 0.1 renders an owned Settings section. Core 0.2 renders this
-      // installed bundle's settings on its package detail page via the keyed
-      // plugins.bundle.config slot. Both use the same component and form face.
+      // Core 0.1 renders the owned Settings section. Core 0.2 supports both
+      // that global Settings entry and this installed bundle's package-detail
+      // page. Both surfaces use the same component and settings form.
       function registerSettingsPage(slotName) {
         return ctx.slots.inject(slotName, function () {
           var options = {
@@ -1764,14 +1760,128 @@ window.__ModuleLoader__.load({
           return ctx.slots.register(options, SettingsSection);
         });
       }
-      if (useConfigForms && typeof configForms.whileServed === "function") {
+
+      function registerSessionActionSlots() {
+        return [
+          ctx.slots.inject("conversation.session.header.actions", function () {
+            return ctx.slots.register(
+              {
+                name: "conversation.session.header.actions",
+                id: "smart-session-title-regenerate",
+                order: 30,
+                label: "Regenerate title",
+                locale: NS,
+                inject: function (sessionId) {
+                  return {
+                    regenerate: function () {
+                      return controller.run(sessionId);
+                    },
+                    sessionId: sessionId,
+                    scope: settingsScope
+                  };
+                }
+              },
+              RegenerateTitleAction
+            );
+          }),
+          ctx.slots.inject("conversation.session.header.actions", function () {
+            return ctx.slots.register(
+              {
+                name: "conversation.session.header.actions",
+                id: "smart-session-title-lock",
+                order: 31,
+                label: "Lock title",
+                locale: NS,
+                inject: function (sessionId) {
+                  return { sessionId: sessionId, scope: settingsScope };
+                }
+              },
+              LockTitleAction
+            );
+          }),
+          ctx.slots.inject("conversation.session.header.actions", function () {
+            return ctx.slots.register({
+              name: "conversation.session.header.actions",
+              id: "smart-session-title-session-id",
+              order: 32,
+              label: "SessionId",
+              locale: NS,
+              inject: function (sessionId) {
+                return { sessionId: sessionId, scope: settingsScope };
+              }
+            }, SessionIdAction);
+          })
+        ];
+      }
+
+      function mountSettingsIntegration(serviceCtx, serviceName) {
+        if (settingsIntegrationMounted) return;
+        var resolvedLegacy = serviceName === "settingsScope"
+          ? optionalService(serviceCtx, "settingsScope")
+          : undefined;
+        var resolvedForms = serviceName === "configForms"
+          ? optionalService(serviceCtx, "configForms")
+          : undefined;
+        if (resolvedLegacy !== undefined && typeof resolvedLegacy.bind === "function") {
+          legacySettings = resolvedLegacy;
+          settingsScope = resolvedLegacy.bind({ namespace: NS });
+          settingsDescribe = typeof resolvedLegacy.describe === "function"
+            ? resolvedLegacy.describe()
+            : undefined;
+          useConfigForms = false;
+        } else if (resolvedForms !== undefined && typeof resolvedForms.get === "function") {
+          configForms = resolvedForms;
+          settingsScope = resolvedForms.get(NS);
+          settingsDescribe = typeof resolvedForms.describe === "function"
+            ? resolvedForms.describe()
+            : undefined;
+          useConfigForms = true;
+        } else {
+          return;
+        }
+        if (settingsScope === undefined || settingsScope === null) return;
+
+        settingsIntegrationMounted = true;
+        serviceCtx.effect(function () {
+          var disposers = [];
+          function keep(disposer) {
+            if (typeof disposer === "function") disposers.push(disposer);
+          }
+          keep(registerSettingsPage("settings.section"));
+          registerSessionActionSlots().forEach(keep);
+          if (useConfigForms && typeof configForms.whileServed === "function") {
+            keep(configForms.whileServed([NS], function () {
+              return registerSettingsPage("plugins.bundle.config");
+            }));
+          }
+          return function () {
+            for (var i = disposers.length - 1; i >= 0; i--) disposers[i]();
+            settingsScope = undefined;
+            settingsDescribe = undefined;
+            settingsIntegrationMounted = false;
+          };
+        }, "smart-session-title: settings integration");
+      }
+
+      var directLegacySettings = optionalService(ctx, "settingsScope");
+      var directConfigForms = optionalService(ctx, "configForms");
+      if (directLegacySettings !== undefined && typeof directLegacySettings.bind === "function") {
+        mountSettingsIntegration(ctx, "settingsScope");
+      } else if (directConfigForms !== undefined && typeof directConfigForms.get === "function") {
+        mountSettingsIntegration(ctx, "configForms");
+      } else if (typeof ctx.inject === "function") {
         ctx.effect(function () {
-          return configForms.whileServed([NS], function () {
-            return registerSettingsPage("plugins.bundle.config");
+          var configFormsFiber = ctx.inject(["configForms"], function (serviceCtx) {
+            mountSettingsIntegration(serviceCtx, "configForms");
           });
-        }, "smart-session-title: config settings page");
-      } else if (settingsScope !== undefined && settingsScope !== null) {
-        registerSettingsPage("settings.section");
+          var legacySettingsFiber = ctx.inject(["settingsScope"], function (serviceCtx) {
+            mountSettingsIntegration(serviceCtx, "settingsScope");
+          });
+          return function () {
+            if (configFormsFiber && typeof configFormsFiber.dispose === "function") configFormsFiber.dispose();
+            if (legacySettingsFiber && typeof legacySettingsFiber.dispose === "function") legacySettingsFiber.dispose();
+          };
+        }, "smart-session-title: settings API bridge");
       }
 
       // Global progress + stop control. `shell.overlay` is the shipped root-scope
@@ -1794,69 +1904,6 @@ window.__ModuleLoader__.load({
         );
       });
 
-      ctx.slots.inject("conversation.session.header.actions", function () {
-        return ctx.slots.register(
-          {
-            name: "conversation.session.header.actions",
-            id: "smart-session-title-regenerate",
-            // Ascending order; the shipped occupants sit at 10 (agent preset)
-            // and 20 (jobs), so 30 places this action beside them.
-            order: 30,
-            // Plain string: this slot's owner renders no projected label, and the
-            // visible text comes from the namespaced `t` the `locale` option
-            // injects into the component.
-            label: "Regenerate title",
-            locale: NS,
-            inject: function (sessionId) {
-              return {
-                regenerate: function () {
-                  return controller.run(sessionId);
-                },
-                // Passed through the face rather than read off the slot: the lock
-                // decision needs the id, and this is the argument that is guaranteed
-                // to be present (the `regenerate` closure already depends on it).
-                sessionId: sessionId,
-                // Lets the button follow the AI on/off setting without a reload.
-                scope: settingsScope
-              };
-            }
-          },
-          RegenerateTitleAction
-        );
-      });
-
-      // The lock toggle sits immediately after the regenerate button (order 31) so
-      // the two decisions read together: "regenerate" and "never regenerate this
-      // one". Same slot, same locale seat, same settings scope — the lock needs no
-      // Remote of its own.
-      ctx.slots.inject("conversation.session.header.actions", function () {
-        return ctx.slots.register(
-          {
-            name: "conversation.session.header.actions",
-            id: "smart-session-title-lock",
-            order: 31,
-            label: "Lock title",
-            locale: NS,
-            inject: function (sessionId) {
-              return {
-                sessionId: sessionId,
-                scope: settingsScope
-              };
-            }
-          },
-          LockTitleAction
-        );
-      });
-      ctx.slots.inject("conversation.session.header.actions", function () {
-        return ctx.slots.register({
-          name: "conversation.session.header.actions",
-          id: "smart-session-title-session-id",
-          order: 32,
-          label: "SessionId",
-          locale: NS,
-          inject: function (sessionId) { return { sessionId: sessionId, scope: settingsScope }; }
-        }, SessionIdAction);
-      });
     }
 
     exports.name = "smart-session-title-client";
@@ -1877,8 +1924,9 @@ window.__ModuleLoader__.load({
     exports.isLockedIn = isLockedIn;
     exports.isAiDisabledSnapshot = isAiDisabledSnapshot;
     /**
-     * Settings page component — `settings.section` on Core 0.1 and the
-     * installed bundle's `plugins.bundle.config` page on Core 0.2.
+     * Shared Settings page component — `settings.section` in the global
+     * Settings navigation and `plugins.bundle.config` on the installed bundle
+     * detail page in Core 0.2.
      *
      * Receives `scope` through the slot's `inject` face: a bound
      * shared settings form exposing `getSnapshot()`, `set(field, value)`

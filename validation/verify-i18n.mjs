@@ -128,7 +128,7 @@ const fakeJsxRuntime = {
   }
 };
 
-const fakePrimitives = {};
+const fakePrimitives = { IconRefreshOutlineRegular: "supported-refresh-icon" };
 
 // ---- render helpers ------------------------------------------------------
 /** One synchronous render pass: hooks read from this component's own state. */
@@ -583,6 +583,57 @@ if (core02SettingsFace.scope !== core02ConfigForm ||
   throw new Error("Core 0.2 bundle page did not receive a ConfigForms controller");
 }
 console.log("✓ Core 0.2 configForms mounts settings on the installed bundle page");
+
+// Both Core 0.2 entry points must exist, including after a late service arrival.
+if (!core02SlotRegistrations.some(r => r.name === "settings.section"))
+  throw new Error("Core 0.2 global Settings entry missing");
+for (const serviceName of ["configForms", "settingsScope"]) {
+  const waiting = new Map();
+  const active = new Map();
+  const cleanups = [];
+  const slots = {
+    inject(name, factory) { return factory(); },
+    register(meta, component) {
+      const key = meta.name + ":" + (meta.id ?? meta.key);
+      if (active.has(key)) throw new Error("duplicate slot " + key);
+      active.set(key, { ...meta, component });
+      return () => active.delete(key);
+    }
+  };
+  const lateCtx = {
+    ...fakeCtx, settingsScope: undefined, configForms: undefined, slots,
+    inject(names, callback) {
+      waiting.set(names[0], callback);
+      return { dispose() {} };
+    }
+  };
+  capturedApply(lateCtx);
+  if (active.has("settings.section:smart-session-title")) throw new Error("settings mounted without service");
+  const serviceCtx = {
+    ...lateCtx,
+    [serviceName]: serviceName === "configForms" ? core02ConfigForms : fakeCtx.settingsScope,
+    effect(factory) { const cleanup = factory(); if (typeof cleanup === "function") cleanups.push(cleanup); }
+  };
+  const mount = waiting.get(serviceName);
+  if (!mount) throw new Error("missing late service dependency " + serviceName);
+  mount(serviceCtx);
+  const checkMounted = () => {
+    for (const key of ["settings.section:smart-session-title",
+      "conversation.session.header.actions:smart-session-title-regenerate",
+      "conversation.session.header.actions:smart-session-title-lock"]) {
+      if (!active.has(key)) throw new Error("late service omitted " + key);
+      if (!active.get(key).inject("session-test").scope) throw new Error("late service omitted settings scope");
+    }
+  };
+  checkMounted();
+  mount(serviceCtx); // duplicate notification must not duplicate registrations
+  while (cleanups.length) cleanups.pop()();
+  if (active.has("settings.section:smart-session-title")) throw new Error("settings slot leaked after service disposal");
+  mount(serviceCtx);
+  checkMounted();
+  while (cleanups.length) cleanups.pop()();
+}
+console.log("✓ settings navigation and header actions survive late service arrival and remount");
 
 const headerAction = slotRegistrations.find((r) => r.id === "smart-session-title-regenerate");
 if (!headerAction) throw new Error("header action registration missing");
@@ -2562,3 +2613,15 @@ await findFirstElement(unifiedTree, n => n.props?.className === "sst-save-route"
 assert(scopeMutations.length === writesBefore + 1, "one save writes one mutation");
 assert(scopeMutations.at(-1).some(op => op.path[0] === "titleLanguage") && scopeMutations.at(-1).some(op => op.path[0] === "maxTitleCharacters"), "one mutation contains both edits");
 console.log("✓ unified save: local drafts, atomic mutation, failure retention and retry");
+
+// React rejects an undefined component; the old test double silently accepted it.
+{
+  const tree = await settle(capturedExport.RegenerateTitleAction, {
+    sessionId: "icon-regression", scope: fakeCtx.settingsScope.bind(), t: tZh,
+    regenerate: async () => ({ status: "success" })
+  });
+  const children = Array.isArray(tree.children) ? tree.children : [tree.children];
+  if (!children.some(node => node?.type === "supported-refresh-icon"))
+    throw new Error("Regenerate title references an unavailable refresh icon");
+}
+console.log("✓ regenerate uses a refresh icon exported by the shipped DSH primitives");
