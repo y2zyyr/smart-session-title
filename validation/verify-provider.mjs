@@ -101,6 +101,47 @@ const req = (text, over = {}) => ({ session: { id: "s1", header: { createdAt: Da
     [err.message, absentCalls.length],
     ["smart-session-title: model error: unknown model error", 1]);
 }
+// B4. Session-linked extension recovery is scoped to this generation and budget.
+{
+  const failure = { blocks: [], finish: { kind: "error", failure: {
+    code: "REQUEST_EXTENSION", message: "private extension details"
+  } } };
+  const success = { blocks: [{ type: "text", text: "修复构建" }], finish: { kind: "stop" } };
+  const calls = [];
+  const deps = mkDeps([[failure], [success]], calls);
+  const p = createSmartSessionTitleProvider(policyFor(), deps);
+  const out = await p.generate(req("修复构建错误"));
+  t("B4 recovery succeeds", [out.title, calls.length], ["修复构建", 2]);
+  t("B4 only retry omits session association", calls.map(c => Object.hasOwn(c, "sessionId")), [true, false]);
+  t("B4 recovery keeps route purpose and budget", calls.map(c => [c.provider, c.model, c.purpose, c.maxTokens]),
+    [["p", "m", "session-title", 1024], ["p", "m", "session-title", 1024]]);
+  t("B4 recovery retains source attribution", out.messageSeqs, [7]);
+  await p.generate(req("修复构建错误"));
+  t("B4 isolation does not leak into next generation", calls[2].sessionId, "s1");
+  for (const maxAttempts of [1, 2, 3]) {
+    const failedCalls = [];
+    const failing = createSmartSessionTitleProvider(policyFor({ settings: { maxAttempts } }), mkDeps([[failure]], failedCalls));
+    let err; try { await failing.generate(req("修复构建错误")); } catch (e) { err = e; }
+    t(`B4 extension attempt cap ${maxAttempts}`, failedCalls.length, Math.min(maxAttempts, 2));
+    t(`B4 extension classified ${maxAttempts}`, err.message.includes("REQUEST_EXTENSION"), true);
+    t(`B4 no private error details ${maxAttempts}`, err.message.includes("private extension details"), false);
+  }
+  const normalCalls = [];
+  const normal = createSmartSessionTitleProvider(policyFor(), mkDeps([
+    [{ finish: { kind: "error", failure: { code: "NETWORK" } } }], [success]], normalCalls));
+  await normal.generate(req("修复构建错误"));
+  t("B4 network retries retain association", normalCalls.map(c => c.sessionId), ["s1", "s1"]);
+  const ac = new AbortController();
+  const abortedCalls = [];
+  const abortedDeps = mkDeps([[failure]], abortedCalls);
+  abortedDeps.llm.stream = async function* (options) {
+    abortedCalls.push(options); yield failure; ac.abort();
+  };
+  let aborted; try {
+    await createSmartSessionTitleProvider(policyFor(), abortedDeps).generate(req("修复构建错误", { signal: ac.signal }));
+  } catch (e) { aborted = e; }
+  t("B4 cancellation prevents isolated retry", [Boolean(aborted), abortedCalls.length], [true, 1]);
+}
 // C. cancellation mid-stream must not retry
 {
   const calls = []; const ac = new AbortController();

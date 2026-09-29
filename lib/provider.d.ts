@@ -178,7 +178,9 @@ export type AttemptFailure = {
  * at all — that shape means the budget was spent on reasoning, so it gets the
  * caller's single retry instead of failing outright.
  */
-export type TitleFailureKind = "timeout" | "cancelled" | "model" | "protocol" | "output" | "excluded";
+/** `extension`: DSH request extension failure; at most one session-free recovery,
+ * within maxAttempts. A repeated extension failure is terminal. */
+export type TitleFailureKind = "extension" | "timeout" | "cancelled" | "model" | "protocol" | "output" | "excluded";
 /** A provider failure that the service will log and swallow (fallback stays). */
 export declare class TitleGenerationError extends Error {
     readonly reason: string;

@@ -483,3 +483,5 @@ On DSH Desktop 2.0.9 the ID occupies a separate left-aligned line between the ti
 The conversation header shows text labels for Regenerate title and Lock title / Title locked. Regeneration replaces the current title, including manual titles, without rerunning the conversation. Locking blocks automatic, manual and batch generation by this plugin; click Title locked to unlock. Chatting, manual renaming and DSH fallback titles remain available. The settings page explains these actions too.
 
 Settings use compact label/control rows. A unified Save settings button sits beside the model choices, and usage help is collapsed at the bottom, and batch optimization keeps its separate entry.
+
+On `REQUEST_EXTENSION`, the next allowed attempt omits the optional LLM session association while preserving the model, title rules, and cancellation. This avoids session-linked extensions; global extension failures still surface explicitly. No extra attempt is added when `maxAttempts` is 1.
