@@ -3,7 +3,7 @@
 English | [简体中文](README.zh-CN.md)
 
 Smarter automatic session titles for **DeepSeek Harness (DSH)**.
-**0.5.0-rc.15 — release candidate**, intended for the npm `next` tag.
+**0.5.0-rc.16 — release candidate**, intended for the npm `next` tag.
 
 
 The settings page now shows model and title rules directly, with advanced options collapsed and visible save feedback. Batch optimization has a separate workspace with automatic loading, title/ID search, and back navigation. Batch routing reflects saved settings; fixed-model mode hides redundant automatic fallback. Date format appears only when a date affix is enabled.
@@ -487,3 +487,5 @@ Settings use compact label/control rows. A unified Save settings button sits bes
 Title LLM calls omit the optional session association from the first attempt, avoiding session-log extension failures even with `maxAttempts: 1`. Model routing, title rules, cancellation and result attribution are preserved. A remaining `REQUEST_EXTENSION` indicates a global DSH extension failure and is reported without repeating the same request.
 
 Restores the global Smart Session Title settings entry on Core 0.2, waits for late settings services, and uses the supported refresh icon so the Regenerate title action renders again.
+
+Fixes the settings panel collapsing into a narrow column in centered host layouts by explicitly sizing its CSS query container.

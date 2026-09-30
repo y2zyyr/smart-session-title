@@ -50,7 +50,7 @@ window.__ModuleLoader__.load({
      * The two are kept in sync deliberately: `validation/verify-i18n.mjs`
      * fails when this string and package.json's `version` drift apart.
      */
-    var PLUGIN_VERSION = "0.5.0-rc.15";
+    var PLUGIN_VERSION = "0.5.0-rc.16";
 
     /**
      * Where the batch block remembers its automatic-fallback checkbox. It is a
@@ -599,7 +599,7 @@ window.__ModuleLoader__.load({
 .sst-settings #sst-maxCharacters { width: 90px !important; }
 .sst-settings [hidden] { display: none !important; }
 .sst-batch { margin-top: 24px; }
-.sst-settings { container-type: inline-size; container-name: sst-settings; max-width: 760px; margin: 0 auto; padding: 4px 0 16px; font-size: 13px; line-height: 1.55; color: inherit; }
+.sst-settings { container-type: inline-size; container-name: sst-settings; width: 100%; min-width: 0; box-sizing: border-box; max-width: 760px; margin: 0 auto; padding: 4px 0 16px; font-size: 13px; line-height: 1.55; color: inherit; }
 .sst-settings * { box-sizing: border-box; }
 .sst-page-heading { margin: 0 0 20px; }
 .sst-page-heading h2 { font-size: 20px; font-weight: 600; margin: 0 0 5px; letter-spacing: -.3px; }
