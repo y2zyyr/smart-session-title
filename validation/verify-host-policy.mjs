@@ -274,6 +274,69 @@ const openOutcome = await commands.createRetitleHandler(fakeSessionTitle, openTo
 });
 t("unlocked /retitle still regenerates", [openOutcome.kind, refreshCalls], ["success", 1]);
 t("unlocked /retitle leaves no token behind", openTokens.outstanding("open-1"), 0);
+
+// DSH Goal sessions are a deliberate exception to the normal title-input
+// projection: Goal-round messages have source.kind="goal", so Core.refresh()
+// returns undefined before our registered provider is invoked. The explicit
+// recovery seam must use the newest Goal objective without adding a fake
+// user/message event to the session history.
+const goalEvents = [
+  { type: "command/run", seq: 4, data: { name: "goal", args: "旧目标", source: { kind: "user" } } },
+  { type: "user/message", seq: 8, data: {
+    source: { kind: "goal", goalId: "g", revision: 2, round: 3 },
+    content: [{ type: "text", text: '<goal_round>\nObjective: "核实最新归档"\nRound: 3/5\n</goal_round>' }]
+  } }
+];
+const goalSession = { id: "goal-1", snapshotEvents: () => goalEvents };
+t("Goal recovery selects newest round objective", commands.selectExplicitGoalTitleMessages(goalSession), [{ seq: 8, text: "核实最新归档" }]);
+const preRoundGoal = {
+  id: "goal-2",
+  snapshotEvents: () => [{ type: "command/run", seq: 2, data: { name: "goal", args: "edit 检查归档流程" } }]
+};
+t("Goal recovery falls back to command objective", commands.selectExplicitGoalTitleMessages(preRoundGoal), [{ seq: 2, text: "检查归档流程" }]);
+const revisedGoal = {
+  id: "goal-3",
+  snapshotEvents: () => [
+    { type: "user/message", seq: 8, data: {
+      source: { kind: "goal", goalId: "old", revision: 1, round: 1 },
+      content: [{ type: "text", text: '<goal_round>\nObjective: "旧目标"\nRound: 1/1\n</goal_round>' }]
+    } },
+    { type: "command/run", seq: 10, data: { name: "goal", args: "edit 新目标" } }
+  ]
+};
+t("Goal recovery prefers a newer command over an old round", commands.selectExplicitGoalTitleMessages(revisedGoal), [{ seq: 10, text: "新目标" }]);
+const clearedGoal = {
+  id: "goal-4",
+  snapshotEvents: () => [
+    { type: "user/message", seq: 8, data: {
+      source: { kind: "goal", goalId: "old", revision: 1, round: 1 },
+      content: [{ type: "text", text: '<goal_round>\nObjective: "旧目标"\nRound: 1/1\n</goal_round>' }]
+    } },
+    { type: "command/run", seq: 10, data: { name: "goal", args: "clear" } }
+  ]
+};
+t("Goal clear blocks stale objective recovery", commands.selectExplicitGoalTitleMessages(clearedGoal), []);
+const recoveredTokens = tokens.createExplicitRegenerationTokens();
+let recoveryCalls = 0;
+const recoveredSessionTitle = {
+  refresh: () => Promise.resolve(undefined),
+  get: () => undefined,
+  rename: (_session, title) => ({ title, source: { kind: "user" } })
+};
+const recoveredOutcome = await commands.createRetitleHandler(
+  recoveredSessionTitle,
+  recoveredTokens,
+  () => settings.resolveTitleSettings({}),
+  undefined,
+  async (session) => {
+    recoveryCalls += 1;
+    const messages = commands.selectExplicitGoalTitleMessages(session);
+    t("Goal recovery passes objective to host seam", messages[0]?.text, "核实最新归档");
+    return recoveredSessionTitle.rename(session, "归档核实");
+  }
+)({ agent: { session: goalSession }, rawInput: "", signal: undefined });
+t("Goal-only /retitle recovers after Core returns no snapshot", [recoveredOutcome.kind, recoveredOutcome.text, recoveryCalls], ["success", "Title regenerated: 归档核实", 1]);
+t("Goal recovery leaves no token behind", recoveredTokens.outstanding("goal-1"), 0);
 const disabledOutcome = await commands.createRetitleHandler(fakeSessionTitle, tokens.createExplicitRegenerationTokens(), () => settings.resolveTitleSettings({ enabled: false }), undefined)({
   agent: { session: { id: "locked-1" } }, rawInput: "", signal: undefined
 });

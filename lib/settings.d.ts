@@ -2,7 +2,7 @@
  * User-facing settings for `smart-session-title`.
  *
  * Pure module: no Cordis, no schemastery import. The loader schema lives in
- * `index.ts` (which already imports the settings schema builder); everything
+ * `index.js` (with shared fields in `settings-schema.js`); everything
  * decision-shaped — defaults, validation, and the relationship between the
  * settings and the deployment's composition config — lives here so it is
  * directly unit-testable.

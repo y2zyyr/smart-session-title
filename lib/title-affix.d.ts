@@ -49,6 +49,10 @@ export declare function buildTitleAffix(options: TitleAffixOptions): string;
  * @param affix - the affix string, possibly empty.
  */
 export declare function bodyBudgetBytes(maxBytes: number, affix: string): number;
+/** Code-point budget for the body after reserving the complete date and separator. */
+export declare function bodyBudgetCharacters(maxCharacters: number | undefined, affix: string): number | undefined;
+/** Omit a date that would leave fewer than four characters for the task. */
+export declare function fitTitleAffix(affix: string, maxCharacters: number | undefined): string;
 /**
  * Join a shortened body and its affix in the configured position.
  */

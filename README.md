@@ -3,10 +3,12 @@
 English | [简体中文](README.zh-CN.md)
 
 Smarter automatic session titles for **DeepSeek Harness (DSH)**.
-**0.5.0-rc.16 — release candidate**, intended for the npm `next` tag.
+**0.5.0-rc.17 — release candidate**, intended for the npm `next` tag.
 
 
-The settings page now shows model and title rules directly, with advanced options collapsed and visible save feedback. Batch optimization has a separate workspace with automatic loading, title/ID search, and back navigation. Batch routing reflects saved settings; fixed-model mode hides redundant automatic fallback. Date format appears only when a date affix is enabled.
+This release adds **title preview and batch before/after comparison**: generate candidates without replacing titles, then apply only those you select. It also fixes exclusion reassembly, final title limits, settings bounds, live locks, fallback route ownership, permanent-error retries, and repeated Goal retitling.
+
+The redesigned interface uses grouped forms, blue action buttons, and Title settings / Batch optimize navigation. Common title rules stay visible; advanced parameters and detailed help are collapsed. A footer Save settings button saves all edits and shows the result. Batch processing supports automatic loading, title/ID search and project filters, with side-by-side title comparisons that stack in narrow panels. Batch routing reflects saved settings; fixed-model mode hides redundant automatic fallback. Date format appears only when a date affix is enabled.
 
 ## What it does
 
@@ -107,13 +109,14 @@ is used.
 
 ## Settings
 
-Open **Settings → Smart Session Title** on Core 0.1. On Core 0.2, open
-**Plugins → Installed → smart-session-title**; its settings appear on the
-package detail page. Core 0.1 persists the `smart-session-title` namespace in
-**`$DSH_HOME/settings.yaml`**. Core 0.2 stores the same fields in this plugin's
+Open **Settings → Smart Session Title** on Core 0.1. Core 0.2 offers the same
+settings from both **Settings → Smart Session Title** and
+**Plugins → Installed → smart-session-title**. Core 0.1 persists the
+`smart-session-title` namespace in **`$DSH_HOME/settings.yaml`**. Core 0.2
+stores the same fields in this plugin's
 volatile Config in the active DSH profile. Both use DSH's own atomic writes,
 revisions, and change notifications. Changes affect the next generation; an
-in-flight request keeps its initial policy. The plugin creates no sidecar file,
+in-flight request keeps its initial policy, except that a new title lock aborts it and prevents accepting its result. The plugin creates no sidecar file,
 custom watcher, or HTTP server.
 The footer of the page shows the loaded plugin version, so a bug report can name
 the exact build.
@@ -126,7 +129,7 @@ the exact build.
 | `model` | Unset | Model ID belonging to that provider |
 | `timeoutMs` | 15000 | Per-attempt timeout; UI range 1000–120000 ms |
 | `maxAttempts` | 2 | Total attempts; range 1–3 |
-| `maxTitleCharacters` | Unset (inherits 80 bytes) | Title **character cap** (Unicode code points); UI range 8–120 |
+| `maxTitleCharacters` | Unset (inherits 80 bytes) | Entire title **character cap**, including the date (Unicode code points); range 8–120 |
 | `titleDatePosition` | Unset (no date) | `prefix` / `suffix`: put the session's creation date before or after the title |
 | `titleDateFormat` | `ymd` | `ymd` (`2026-09-13`) or `md` (`09-13`); unused while no position is chosen |
 | `titleStyle` | Unset (plugin default, currently action + object) | `action-object` or `short-name` |
@@ -138,13 +141,13 @@ the exact build.
 remains effective until the user chooses a mode. The shipped bundle has no pin.
 Explicit `current-session` always uses the session route.
 
-Edit settings, then click **Save settings** at the right of the model selection row. Changes stay local until saved; model and title rules are written together. Failed saves retain your edits. Batch optimization uses the last saved route. Provider and model must both be selected in fixed-model mode.
+Edit settings, then click **Save settings** in the page footer. Changes stay local until saved; model and title rules are written together. Failed saves and page navigation retain your edits. Batch optimization uses the last saved route. Provider and model must both be selected in fixed-model mode.
 **Advanced** exposes timeout and attempts. Empty numeric fields inherit the bundle
 configuration; deployment-level compression options are in `cordis.patch.yml`.
 
 ### Title shape and content (cap, date, style, language, exclusions)
 
-The **Title shape and content** block on the settings page needs no expanding:
+**Title shape and content** is shown directly, separately from Advanced:
 
 - **Maximum title characters**: empty inherits the deployment config, i.e. DSH's
   `maxTitleBytes: 80` (about 26 CJK characters or 80 Latin characters). A value
@@ -158,7 +161,8 @@ The **Title shape and content** block on the settings page needs no expanding:
 - The affix is **reserved out of the 80-byte budget** before the body is
   shortened: DSH truncates an over-long title from the *tail*, so an unreserved
   suffix would be the first thing lost. A character cap therefore leaves room
-  for the date automatically.
+  for the date automatically. If the date would leave fewer than four body characters, it is omitted; an 8-character cap therefore omits a full year–month–day date.
+- A date containing an excluded term, or forming one across the body/date boundary, is omitted.
 - When no usable date exists (a session header without `createdAt`, or an
   unresolvable time zone) the plugin adds no affix instead of a broken title.
 - The date applies only to **titles this plugin generates**: the fallback title
@@ -240,7 +244,7 @@ pins that title. The button shows the state itself: a closed padlock means
 locked, and the hover text and accessible label always name what a click will do
 ("Lock title" / "Unlock title").
 
-All four entry points honour it:
+Automatic generation, `/retitle`, preview, application and batch processing honour it:
 
 | Rule | Actual behaviour |
 |---|---|
@@ -252,6 +256,7 @@ All four entry points honour it:
 - The lock lives in this plugin's **host-managed configuration** (`lockedSessionIds`),
   **not in browser localStorage**: it survives a new window, a cleared browser
   profile, and a DSH restart.
+- Locking during generation aborts the model stream. A final live check refuses the result even if a settings notification was missed. A full 500-entry lock list permits unlocking but rejects a new lock before writing.
 - There is no "include anyway" override — unlocking is an explicit action. That is
   deliberate: a lock that one entry point can bypass is not a lock.
 - **Two things it cannot lock**, the same class of limit as the exclusion words:
@@ -270,8 +275,7 @@ Pick the rows (filter by project, select all within the current filter), then
 start the run. Up to 300 rows are rendered at once — narrow with the project
 filter for larger histories.
 
-- One `/retitle` per session, **strictly sequential**: a run of N sessions costs
-  N model calls and never runs two generations at once.
+- One generation at a time, **strictly sequential**. Each session may make up to `maxAttempts` model calls; an automatic fallback pass can add calls. Preview also calls the model, while applying a candidate does not.
 - Selected titles are rewritten, **including titles you renamed by hand** — the
   explicit `/retitle` path is DSH's documented way to unpin a manual title.
 - Sessions without an eligible user message and subagent sessions are skipped
@@ -298,10 +302,20 @@ filter for larger histories.
   the run: those sessions cannot succeed while following the session model.
 - **Automatic fallback** (opt-in, off by default): with a saved configured model,
   a finished run retries exactly the failed sessions once on that configured
-  route, then restores the previous title mode. The switch is a real settings
+  route, then restores the previous title mode only while it still owns the temporary route. User saves to mode, provider or model are preserved, including an explicit save of the same configured mode. The switch is a real settings
   write for the duration of the retry, so it stays off unless you ask for it.
   The checkbox itself is remembered in browser storage, not in host-managed
   settings: it only controls batch behavior in this browser.
+
+## Preview and apply
+
+Click **Preview title** beside a conversation title to see its previous title and a candidate. Generating the preview calls the configured title model but does not write a `session/title` event. **Apply this title** saves that exact candidate through DSH's official `sessionTitle.rename()`; application makes no new model call. The accepted title has user ownership and is protected from automatic regeneration.
+
+In **Batch optimize**, select sessions and click **Preview selected**. Review the side-by-side previous/candidate pairs, which stack in narrow panels. After preview, the session picker collapses; expand **Change session selection** to edit it. Search and project filters also apply to candidates. Filtering keeps existing selections, and the footer counts all selected candidates. Uncheck any you do not want, then click **Apply selected** in the footer. Applied rows are marked; failed applications retain their reason. **Optimize directly** still regenerates and writes immediately; its fallback option is under **Direct optimization and fallback**. Both preview and application run serially and support Stop. Closing Settings retains progress and comparisons; reloading the window clears the client queue and comparison view.
+
+Previews use the current saved route without the temporary automatic fallback, which would invalidate their settings revision. Fix a failed route, save it, and preview again. The host keeps at most 500 candidates for one hour. New user input, Goal changes, title changes, or relevant title setting/route changes require a new preview. Locks and the AI switch are checked again at application. A host restart or plugin unload clears the cache.
+
+Command equivalents are `/title-preview` (returns a JSON candidate with `previewId`) and `/title-apply <previewId>`. Tokens belong to one session and can be applied once. DSH records command lifecycle/results as usual; a preview changes no title and adds no synthetic user message.
 
 ## Model modes
 
@@ -317,7 +331,7 @@ Configured mode supports using a different provider and model from the conversat
 ## Regenerate
 
 Run `/retitle` or click the regenerate button beside the session title.
-Both invoke DSH's official `SessionTitleService.refresh()`.
+Ordinary user-input sessions invoke DSH's official `SessionTitleService.refresh()`; Goal-only sessions use the guarded recovery described below.
 The button shows loading, prevents duplicate requests, and returns to idle afterward.
 
 **Explicit regeneration can replace a manual title.** Automatic generation cannot.
@@ -331,6 +345,14 @@ task — typically a writing-mode session whose only human messages are terse
 commands such as `继续写` or `发布` — `/retitle` generates from the **newest** such
 command instead of failing. Automatic scheduling keeps the filter unchanged:
 greetings, bare URLs, paths, code-only and punctuation-only prompts still abstain.
+
+A session driven only by DSH `/goal` commands is also retitleable on explicit
+request. Core does not include Goal-source messages in its ordinary title input,
+so the plugin reads the newest Goal objective as an explicit-only temporary input;
+it does not append a synthetic conversation message or use this path for automatic
+title scheduling. Repeated `/retitle` after `/goal edit` uses the new objective even when a previous title exists. A newer generation supersedes an older one, and intervening input, route changes or manual renaming prevents stale output from being saved. Accepted Goal titles use the official `rename()` API and have user ownership.
+
+Permanent adapter failures such as `UNKNOWN_MODEL`, `NO_ADAPTER`, `AUTH` and invalid credentials do not retry. Transient failures use cancellable backoff (250 ms, then 500 ms), respecting `providerRetryAfterMs` only within a bounded window of at most 5 seconds and no longer than `timeoutMs`. A longer retry-after is reported as a failure instead of retrying early. Output-quality retries remain bounded by `maxAttempts`.
 
 ## Weak first prompts
 
@@ -439,13 +461,13 @@ Private development reports, session records, and local test fixtures are exclud
 ## Development checks
 
 Run `npm test` with Node.js 22.15 or newer. The repository includes client/i18n,
-host-policy, and provider behavior tests; no additional dependencies are needed.
+host-policy, provider behavior, preview lifecycle and host integration tests; no additional dependencies are needed.
 Validation files are excluded from the published package by the `files` whitelist.
 
 Settings reject out-of-range or fractional numeric input with an explanation and
 verify persisted values after writes. Automatic fallback preserves overall batch
 counts and shows retry progress separately. Stopping it is reported as stopped;
-mode changes observed during fallback are preserved when restoring the route.
+mode, provider/model changes and explicit same-value saves during fallback are preserved when restoring the route.
 The exclusion tests drive the real provider with a fake model stream and assert
 that a term never reaches either half of the prompt, that a surviving term is
 retried exactly once and then deleted, and that an all-excluded prompt abstains
@@ -463,29 +485,25 @@ block** is retried once (asserting both calls carry the configured `maxTokens`),
 while a `max-tokens` finish **with** a text block stays a terminal protocol
 failure after a single call.
 
-The settings page uses four collapsible cards: model, title shape and content, advanced parameters, and batch retitling.
-All four sections start collapsed and show concise saved-setting summaries;
-an active batch opens its controls automatically. The layout adapts to narrow
-windows, and form fields have associated labels and visible keyboard focus.
+The settings page shows model choices and common title rules directly, with a unified Save settings button in the footer. Advanced parameters and usage help start collapsed. Navigation switches between settings and batch comparison. The layout adapts to narrow panels and DSH's dark theme; fields have associated labels and visible keyboard focus.
 
-The expanded title-format section groups style, language and length together,
-places dates on a separate row, and gives exclusion words a full-width editor.
+Title rules use two columns, stack in narrow panels, and give exclusion words a full-width editor.
 Detailed rules stay in a collapsed help section.
 
 ### Copy the current SessionId
 
 The conversation header shows the current session ID in small, muted monospace text. Click to copy the full ID even when the display is truncated; hover to see the full value. Paste it into another conversation to help an agent locate this session (reading requires suitable tools and permissions). Open another session first to copy its ID. A failed clipboard write offers a read-only field for manual copying.
 
-In plugin settings, **Show SessionId in the conversation header** changes this after clicking Save settings. It is on by default, persists as `showSessionId`, and works independently of AI title generation and title locking. It does not change session titles.
+In plugin settings, **Show Session ID** changes this after clicking Save settings. It is on by default, persists as `showSessionId`, and works independently of AI title generation and title locking. It does not change session titles.
 
 On DSH Desktop 2.0.9 the ID occupies a separate left-aligned line between the title toolbar and the conversation/trajectory tabs. This scoped layout depends on the verified host CSS class; if it changes, the ID falls back to the inline header slot.
 
 The conversation header shows text labels for Regenerate title and Lock title / Title locked. Regeneration replaces the current title, including manual titles, without rerunning the conversation. Locking blocks automatic, manual and batch generation by this plugin; click Title locked to unlock. Chatting, manual renaming and DSH fallback titles remain available. The settings page explains these actions too.
 
-Settings use compact label/control rows. A unified Save settings button sits beside the model choices, and usage help is collapsed at the bottom, and batch optimization keeps its separate entry.
+Controls share consistent heights, spacing and button hierarchy, with primary actions anchored at the bottom. Candidate titles use a pale blue background, completion and in-flight progress have distinct presentations, and detailed help starts collapsed.
 
-Title LLM calls omit the optional session association from the first attempt, avoiding session-log extension failures even with `maxAttempts: 1`. Model routing, title rules, cancellation and result attribution are preserved. A remaining `REQUEST_EXTENSION` indicates a global DSH extension failure and is reported without repeating the same request.
+Title model requests omit the optional `sessionId` association from the first attempt, including with `maxAttempts: 1`. This retains rc.16 isolation from session-linked DSH request extensions. A global `REQUEST_EXTENSION` failure is terminal and reports its cause without repeating the request. All model calls still use `ctx.llm.stream()`.
 
-Restores the global Smart Session Title settings entry on Core 0.2, waits for late settings services, and uses the supported refresh icon so the Regenerate title action renders again.
+The Core 0.2 global settings entry, late settings-service mounting, supported refresh icon, and explicit query-container sizing from rc.16 remain in place.
 
-Fixes the settings panel collapsing into a narrow column in centered host layouts by explicitly sizing its CSS query container.
+The additional regressions cover exclusions reconstructed by deletion, compressed placeholders and system examples; final title/date caps; both settings schema generations; locks during streaming; permanent/transient errors and cancellation during backoff; one-shot previews, expiry and stale-session rejection; selected batch application; repeated Goal edits and superseded Goal generations. The fake React renderer tracks effect dependencies and cleanup, and exercises effect replay and unmount cancellation.

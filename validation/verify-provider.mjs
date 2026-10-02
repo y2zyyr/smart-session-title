@@ -75,11 +75,11 @@ const req = (text, over = {}) => ({ session: { id: "s1", header: { createdAt: Da
 // a real provider outage, and the 1s/8ms timing difference was the only clue.
 {
   const calls = [];
-  const p = createSmartSessionTitleProvider(policyFor({ settings: { maxAttempts: 1 } }), mkDeps([
+  const p = createSmartSessionTitleProvider(policyFor({ settings: { maxAttempts: 3 } }), mkDeps([
     [{ blocks: [], finish: { kind: "error", failure: { message: "provider body text", code: "UNKNOWN_MODEL", status: 404 } } }]], calls));
   let err; try { await p.generate(req("修复构建错误")); } catch (e) { err = e; }
   t("B3 code and status reach the message",
-    err.message, "smart-session-title: no usable title after 1 attempt(s): smart-session-title: model error: upstream failure (code=UNKNOWN_MODEL, status=404)");
+    err.message, "smart-session-title: model error: upstream failure (code=UNKNOWN_MODEL, status=404)");
   t("B3 provider text is never replayed", /provider body text/.test(err.message), false);
   t("B3 one call", calls.length, 1);
 }
@@ -278,5 +278,90 @@ const SHORT_CMDS = [{ text: "继续写", seq: 1 }, { text: "发布", seq: 2 }, {
   const out = await p.generate(req("", { messages: SHORT_CMDS }));
   t("K4 fallback still overrides a manual title on /retitle", out.title, "续写章节");
 }
+
+// L. Exclusions must stay absent after compression, deletion and prompt assembly.
+{
+  const calls = [], logs = [];
+  const deps = mkDeps([[{ blocks: [{ type: "text", text: "修复客户内部甲登录错误" }], finish: { kind: "stop" } }]], calls);
+  deps.logger = { info: x => logs.push(x), warn: x => logs.push(x) };
+  const p = createSmartSessionTitleProvider(policyFor({ settings: { titleExclusions: ["客户甲", "内部", "React"], titleLanguage: "zh" } }), deps);
+  const out = await p.generate(req("修复客户内部甲 React 页面登录问题"));
+  const sent = calls.map(x => JSON.stringify([x.system, x.messages])).join("\n");
+  t("L reconstructed name, fixed system examples and output are filtered", [sent.includes("客户甲"), /react/i.test(sent), out.title.includes("客户甲"), calls.length], [false, false, false, 2]);
+  t("L exclusions never enter logs", logs.some(x => /客户甲|内部|React/i.test(x)), false);
+}
+// L2. Compression's placeholders are checked too, not just the original input.
+{
+  const { prepareTitleInput, compileTitleExclusions, findExcludedTerm } = await import(B + "title-policy.js");
+  const limits = conf.resolveTitleConfig({ maxRawInputBytes: 200, targetPreparedInputBytes: 160 });
+  const result = prepareTitleInput("修复登录问题\n```js\n" + "const x = 1;\n".repeat(100) + "```\n补充配置", limits, ["code", "omitted"]);
+  t("L2 compressed prompt contains no excluded placeholder words", findExcludedTerm(result.text, compileTitleExclusions(["code", "omitted"])), undefined);
+}
+// M. The final title, including its date, obeys both budgets and exclusions.
+for (const [name, prefs, check] of [
+  ["date excluded", { titleDatePosition: "suffix", titleExclusions: ["2026"] }, out => !out.title.includes("2026")],
+  ["8 character cap omits oversized date", { titleDatePosition: "suffix", maxTitleCharacters: 8 }, out => Array.from(out.title).length <= 8 && !out.title.includes("2026")],
+  ["20 character cap includes date", { titleDatePosition: "suffix", maxTitleCharacters: 20 }, out => Array.from(out.title).length <= 20 && out.title.endsWith("2026-09-13")],
+  ["body/date boundary exclusion", { titleDatePosition: "suffix", titleExclusions: ["问题 · 2026"] }, out => !out.title.includes("2026")]
+]) {
+  const calls = [];
+  const p = createSmartSessionTitleProvider(policyFor({ settings: prefs }), mkDeps([[{ blocks: [{ type: "text", text: "修复登录配置页面问题" }], finish: { kind: "stop" } }]], calls));
+  const out = await p.generate(req("修复登录配置页面问题"));
+  t("M " + name, check(out), true);
+  t("M " + name + " byte cap", Buffer.byteLength(out.title) <= 80, true);
+}
+// N. Retry only transient failures, wait within a bounded window, and cancel waits.
+for (const [code, status, expected] of [["AUTH", 401, 1], ["INVALID_CREDENTIAL", 403, 1], ["NO_ADAPTER", undefined, 1], ["QUOTA", 429, 1], ["BAD_REQUEST", 400, 1], ["RATE_LIMIT", 429, 2], ["UPSTREAM", 503, 2]]) {
+  const calls = [], delays = [];
+  const deps = mkDeps([[{ blocks: [], finish: { kind: "error", failure: { code, status, providerRetryAfterMs: 600, message: "private provider text" } } }], [{ blocks: [{ type: "text", text: "修复构建问题" }], finish: { kind: "stop" } }]], calls);
+  deps.waitForRetry = async (ms) => { delays.push(ms); };
+  const p = createSmartSessionTitleProvider(policyFor({ settings: { maxAttempts: 3 } }), deps);
+  try { await p.generate(req("修复构建问题")); } catch {}
+  t("N " + code + " call count", calls.length, expected);
+  t("N " + code + " delay", delays, expected === 2 ? [600] : []);
+}
+{
+  const calls = [], delays = [];
+  const deps = mkDeps([[{ blocks: [], finish: { kind: "error", failure: { code: "RATE_LIMIT", status: 429, providerRetryAfterMs: 30000 } } }]], calls);
+  deps.waitForRetry = async ms => delays.push(ms);
+  try { await createSmartSessionTitleProvider(policyFor(), deps).generate(req("修复构建问题")); } catch {}
+  t("N long Retry-After is terminal, never shortened", [calls.length, delays.length], [1, 0]);
+}
+{
+  const abort = new AbortController(), calls = [];
+  let waiting;
+  const started = new Promise(resolve => { waiting = resolve; });
+  const deps = mkDeps([[{ blocks: [], finish: { kind: "error", failure: { code: "RATE_LIMIT", status: 429, providerRetryAfterMs: 1000 } } }]], calls);
+  deps.waitForRetry = (ms, signal) => new Promise((resolve, reject) => { waiting(); signal.addEventListener("abort", () => reject(signal.reason), { once: true }); });
+  const result = createSmartSessionTitleProvider(policyFor(), deps).generate(req("修复构建问题", { signal: abort.signal })).catch(x => x);
+  await started; abort.abort(); await result;
+  t("N stopping during backoff never starts another call", calls.length, 1);
+}
+// O. A live lock aborts the stream; even without notifications the final gate holds.
+{
+  const calls = []; let listener, unlocked = true, unsubscribed = 0, streamStarted;
+  const started = new Promise(resolve => { streamStarted = resolve; });
+  const deps = mkDeps([], calls);
+  deps.subscribeSettings = callback => { listener = callback; return () => { unsubscribed++; }; };
+  deps.llm.stream = options => ({ async *[Symbol.asyncIterator]() {
+    calls.push(options); streamStarted();
+    await new Promise((resolve, reject) => options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true }));
+  } });
+  const config = conf.resolveTitleConfig();
+  const getPolicy = () => ({ config, settings: settings.resolveTitleSettings(unlocked ? {} : { lockedSessionIds: ["s1"] }) });
+  const result = createSmartSessionTitleProvider(getPolicy, deps).generate(req("修复登录错误")).catch(x => x);
+  await started; unlocked = false; listener();
+  const error = await result;
+  t("O locking during a stream immediately aborts", [calls[0].signal.aborted, error.abstentionReason, unsubscribed, calls.length], [true, "locked", 1, 1]);
+}
+{
+  const calls = []; let locked = false;
+  const deps = mkDeps([], calls);
+  deps.llm.stream = options => ({ async *[Symbol.asyncIterator]() { calls.push(options); locked = true; yield { blocks: [{ type: "text", text: "修复登录错误" }], finish: { kind: "stop" } }; } });
+  const getPolicy = () => ({ config: conf.resolveTitleConfig(), settings: settings.resolveTitleSettings(locked ? { lockedSessionIds: ["s1"] } : {}) });
+  const error = await createSmartSessionTitleProvider(getPolicy, deps).generate(req("修复登录错误")).catch(x => x);
+  t("O final live recheck refuses a result even without notifications", error.abstentionReason, "locked");
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

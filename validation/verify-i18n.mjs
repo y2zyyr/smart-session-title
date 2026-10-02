@@ -64,17 +64,17 @@ window.__ModuleLoader__ = {
 
 // ---- fake React ----------------------------------------------------------
 /**
- * Hook state is kept per COMPONENT FUNCTION, the way React keeps it per fiber.
- *
- * One shared array is not faithful: this fake never runs effect cleanups, so a
- * component's subscription stays live after the test moves on, and its `setState`
- * would then write into whatever component mounts NEXT at the same hook index.
- * That produced state no real React can produce — an earlier component's settings
- * snapshot turning up in a later component's unrelated state slot — so components
- * are isolated here instead.
+ * One simulated fiber per component function. Setters capture that fiber's
+ * slots; effects track dependencies and cleanup. `settle` remounts one fiber,
+ * while `flush` preserves it. Explicit replay tests simulate StrictMode.
  */
 const componentState = new Map();
 const componentRefs = new Map();
+const componentEffects = new Map();
+const componentMemos = new Map();
+let effectSlots = [];
+let memoSlots = [];
+const sameDeps = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((value, i) => Object.is(value, b[i]));
 let state = [];
 // Refs, like state, must survive re-renders (real React keeps them by hook
 // order) — otherwise a component that guards on a previous value can never see
@@ -89,7 +89,7 @@ const fakeReact = {
     // Capture THIS render's slot array, not the module-level binding: the binding
     // is re-pointed by every `renderPass`, so a setter that read it later would
     // write into whichever component happens to be rendering — or, for a stale
-    // subscription (this fake never runs effect cleanups), into a LATER component's
+    // subscription (this fake runs effect cleanups), into a LATER component's
     // same-numbered slot. A real React setter is bound to its own fiber.
     const slot = state;
     if (slot[i] === undefined) {
@@ -99,8 +99,15 @@ const fakeReact = {
       slot[i] = typeof v === "function" ? v(slot[i]) : v;
     }];
   },
-  useEffect(fn) {
-    pendingEffects.push(fn);
+  useEffect(fn, deps) {
+    const i = cursor++;
+    const slots = effectSlots;
+    if (slots[i] && sameDeps(slots[i].deps, deps)) return;
+    pendingEffects.push(() => {
+      slots[i]?.cleanup?.();
+      const cleanup = fn();
+      slots[i] = { deps, cleanup: typeof cleanup === "function" ? cleanup : undefined, fn };
+    });
   },
   useRef(init) {
     const i = cursor++;
@@ -108,8 +115,10 @@ const fakeReact = {
     if (slot[i] === undefined) slot[i] = { current: init };
     return slot[i];
   },
-  useCallback(fn) {
-    return fn;
+  useCallback(fn, deps) {
+    const i = cursor++;
+    if (!memoSlots[i] || !sameDeps(memoSlots[i].deps, deps)) memoSlots[i] = { deps, fn };
+    return memoSlots[i].fn;
   },
   createElement(type, props, ...children) {
     return { type, props: props || {}, children };
@@ -141,6 +150,10 @@ function renderPass(component, props) {
   if (!componentRefs.has(component)) componentRefs.set(component, []);
   state = componentState.get(component);
   refs = componentRefs.get(component);
+  if (!componentEffects.has(component)) componentEffects.set(component, []);
+  if (!componentMemos.has(component)) componentMemos.set(component, []);
+  effectSlots = componentEffects.get(component);
+  memoSlots = componentMemos.get(component);
   return component(props);
 }
 
@@ -152,7 +165,13 @@ function renderPass(component, props) {
  * A fresh mount starts from EMPTY hook state for that component only; another
  * component's state is untouched (see `componentState`).
  */
+function unmount(component) {
+  for (const slot of componentEffects.get(component) || []) slot?.cleanup?.();
+  componentEffects.delete(component);
+  componentMemos.delete(component);
+}
 async function settle(component, props) {
+  unmount(component);
   state = [];
   refs = [];
   componentState.set(component, state);
@@ -620,7 +639,8 @@ for (const serviceName of ["configForms", "settingsScope"]) {
   const checkMounted = () => {
     for (const key of ["settings.section:smart-session-title",
       "conversation.session.header.actions:smart-session-title-regenerate",
-      "conversation.session.header.actions:smart-session-title-lock"]) {
+      "conversation.session.header.actions:smart-session-title-lock",
+      "conversation.session.header.actions:smart-session-title-preview"]) {
       if (!active.has(key)) throw new Error("late service omitted " + key);
       if (!active.get(key).inject("session-test").scope) throw new Error("late service omitted settings scope");
     }
@@ -1106,8 +1126,8 @@ const uiListSessions = () => {
 const batchProps = { t: tZh, batch: uiBatch, listSessions: uiListSessions, disabled: false };
 let uiTree = await settle(capturedExport.BatchTitleOptimizer, batchProps);
 let uiText = renderTree(uiTree).join(" ");
-if (!uiText.includes(tZh("batch.legend")) || !uiText.includes(tZh("batch.intro"))) {
-  throw new Error("batch block did not render its legend/intro");
+if (uiTree.props["aria-label"] !== tZh("batch.legend") || !uiText.includes(tZh("batch.intro"))) {
+  throw new Error("batch workspace lost its accessible name or direct-optimization explanation");
 }
 if (listCalls !== 1) throw new Error("batch workspace must load once on entry");
 const loadButton = collectButtons(uiTree).find((b) => b.text === tZh("batch.reload"));
@@ -1170,6 +1190,7 @@ const pageRun = detachBatch.isRunning();
 if (pageRun !== true) throw new Error("batch should be running after start");
 // Closing the page unmounts it, so its own hook state goes away (this component
 // only — the runner lives in plugin scope, which is the point of the test).
+unmount(capturedExport.BatchTitleOptimizer);
 componentState.set(capturedExport.BatchTitleOptimizer, []);
 state = [];
 pendingEffects = [];
@@ -1500,7 +1521,7 @@ const rememberedTree = await settle(capturedExport.BatchTitleOptimizer, {
   disabled: false,
   route: { mode: "current-session", provider: "scnet", model: "DeepSeek-V4-Flash" }
 });
-const fallbackBox = collectInputs(rememberedTree, "checkbox")[0];
+const fallbackBox = collectInputs(rememberedTree, "checkbox").find(input => input.props.id === "sst-batch-fallback");
 if (!fallbackBox) throw new Error("fallback checkbox missing");
 if (fallbackBox.props.checked !== true) {
   throw new Error("a remembered fallback preference must come back checked");
@@ -1519,7 +1540,7 @@ const toggledTree = await flush(capturedExport.BatchTitleOptimizer, {
 if (window.localStorage.getItem(FALLBACK_KEY) !== "0") {
   throw new Error("toggling the fallback must be remembered in browser storage");
 }
-if (collectInputs(toggledTree, "checkbox")[0].props.checked !== false) {
+if (collectInputs(toggledTree, "checkbox").find(input => input.props.id === "sst-batch-fallback").props.checked !== false) {
   throw new Error("the checkbox must follow the toggle");
 }
 console.log("✓ batch fallback: preference round-trips through browser storage");
@@ -1536,7 +1557,7 @@ const noRouteText = renderTree(noRouteTree).join(" ");
 if (!noRouteText.includes(tZh("batch.fallbackNeedsRoute"))) {
   throw new Error("without a configured route the fallback must explain itself");
 }
-if (collectInputs(noRouteTree, "checkbox")[0].props.disabled !== true) {
+if (collectInputs(noRouteTree, "checkbox").find(input => input.props.id === "sst-batch-fallback").props.disabled !== true) {
   throw new Error("without a configured route the fallback must be disabled");
 }
 console.log("✓ batch fallback: needs a saved configured route, and says so");
@@ -2115,12 +2136,11 @@ console.log("✓ host: generate() applies the date affix from the session's crea
 
 // The cap and the reservation must both hold on the FINAL title.
 const cappedAffixed = await buildProvider(
-  { maxTitleCharacters: 12, titleDatePosition: "suffix", titleDateFormat: "ymd" },
+  { maxTitleCharacters: 20, titleDatePosition: "suffix", titleDateFormat: "ymd" },
   CREATED_AT
 );
-const cappedBody = cappedAffixed.title.slice(0, -expectedSuffix.length);
-if (Array.from(cappedBody).length > 12) {
-  throw new Error(`the character cap must bound the body only: ${cappedAffixed.title}`);
+if (Array.from(cappedAffixed.title).length > 20) {
+  throw new Error(`the character cap must bound the entire title: ${cappedAffixed.title}`);
 }
 if (!cappedAffixed.title.endsWith(expectedSuffix)) {
   throw new Error("the cap must not eat the reserved suffix");
@@ -2572,7 +2592,7 @@ const idEn = await settle(capturedExport.SessionIdAction, { ...idProps, t: tEn }
 assert(findFirstElement(idEn, n => n.type === "button").props.title.startsWith(tEn("sessionId.copy")), "English copy label");
 assert(await settle(capturedExport.SessionIdAction, { ...idProps, sessionId: "" }) === null, "missing ID hidden");
 console.log("✓ SessionId: defaults, validation, full copy, failure fallback, live toggle and i18n");
-console.log("\n✅ ALL TESTS PASSED");
+
 
 for (const [tree, translate] of [[rtaZh, tZh], [rtaEn, tEn]]) {
   assert(renderTree(tree).join(" ").includes(translate("action.short")), "regenerate has a visible text label");
@@ -2603,6 +2623,14 @@ findFirstElement(unifiedTree, n => n.props?.id === "sst-maxCharacters").props.on
 unifiedTree = await flush(capturedExport.SettingsSection, unifiedProps, unifiedTree);
 assert(scopeMutations.length === writesBefore, "edits remain local before Save");
 assert(findFirstElement(unifiedTree, n => n.props?.id === "sst-titleLanguage").props.value === "en", "draft select reflects unsaved edit");
+assert(renderTree(findFirstElement(unifiedTree, n => n.props?.className === "sst-save-status")).join("").includes(tZh("settings.unsaved")),
+  "staged edits must have a localized unsaved indicator");
+collectButtons(unifiedTree).find(b => b.text === tZh("batch.open")).props.onClick();
+unifiedTree = await flush(capturedExport.SettingsSection, unifiedProps, unifiedTree);
+collectButtons(unifiedTree).find(b => b.text === tZh("batch.back")).props.onClick();
+unifiedTree = await flush(capturedExport.SettingsSection, unifiedProps, unifiedTree);
+assert(findFirstElement(unifiedTree, n => n.props?.id === "sst-maxCharacters").props.value === "30" && scopeMutations.length === writesBefore,
+  "page navigation must retain drafts without writing settings");
 const realUnifiedMutate = scope.mutate;
 scope.mutate = async () => { throw new Error("test write failure"); };
 await findFirstElement(unifiedTree, n => n.props?.className === "sst-save-route").props.onClick();
@@ -2613,6 +2641,188 @@ await findFirstElement(unifiedTree, n => n.props?.className === "sst-save-route"
 assert(scopeMutations.length === writesBefore + 1, "one save writes one mutation");
 assert(scopeMutations.at(-1).some(op => op.path[0] === "titleLanguage") && scopeMutations.at(-1).some(op => op.path[0] === "maxTitleCharacters"), "one mutation contains both edits");
 console.log("✓ unified save: local drafts, atomic mutation, failure retention and retry");
+unifiedTree = await flush(capturedExport.SettingsSection, { ...unifiedProps, t: tEn }, unifiedTree);
+assert(renderTree(findFirstElement(unifiedTree, n => n.props?.className === "sst-save-status")).join("") === tEn("settings.saved"),
+  "a saved status must follow a later language switch");
+findFirstElement(unifiedTree, n => n.props?.id === "sst-maxCharacters").props.onChange({ target: { value: "5" } });
+unifiedTree = await flush(capturedExport.SettingsSection, { ...unifiedProps, t: tEn }, unifiedTree);
+assert(renderTree(findFirstElement(unifiedTree, n => n.props?.role === "alert")).join("").includes(tEn("settings.invalidNumber")),
+  "numeric validation error must use the active language");
+unifiedTree = await flush(capturedExport.SettingsSection, unifiedProps, unifiedTree);
+assert(renderTree(findFirstElement(unifiedTree, n => n.props?.role === "alert")).join("").includes(tZh("settings.invalidNumber")),
+  "a retained validation error must follow a later language switch");
+console.log("✓ settings feedback: unsaved draft navigation and live localization of saved and validation messages");
+
+// ---- preview and comparison regressions ---------------------------------
+for (const file of ["settings-schema", "title-preview"]) {
+  const js = readFileSync(join(ROOT, "lib", file + ".js"), "utf8");
+  const declaration = readFileSync(join(ROOT, "lib", file + ".d.ts"), "utf8");
+  assert(js.length > 0 && declaration.length > 0, file + " ships with a declaration");
+}
+assert(readFileSync(join(ROOT, ".gitignore"), "utf8").includes("!validation/verify-preview.mjs"), "preview regression script must be included in source control");
+assert(slotRegistrations.some(x => x.id === "smart-session-title-preview" && x.locale === capturedExport.NS), "preview header slot carries the i18n namespace");
+const previewValue = (sessionId, index = 1) => ({ kind: "title-preview", sessionId,
+  previewId: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+  previousTitle: "Old title " + sessionId, title: "Fix login " + sessionId, expiresAt: Date.now() + 3600000 });
+const previewResult = candidate => ({ ok: true, value: { result: { kind: "success", text: JSON.stringify(candidate) } } });
+assert(capturedExport.parseTitlePreview("broken JSON", "s1") === undefined, "malformed JSON rejected");
+assert(capturedExport.parseTitlePreview(JSON.stringify(previewValue("other")), "s1") === undefined, "wrong session preview rejected");
+assert(capturedExport.parseTitlePreview(JSON.stringify({ ...previewValue("s1"), previewId: "not a token" }), "s1") === undefined, "invalid token rejected");
+
+for (const translate of [tZh, tEn]) {
+  fakeScopeSnapshot = { status: "ready", writable: true, value: { enabled: true }, user: {} };
+  const calls = [];
+  const props = { t: translate, scope, sessionId: "preview-header", execute: (line, signal) => {
+    calls.push({ line, signal }); return Promise.resolve(line === "/title-preview" ? previewResult(previewValue(props.sessionId)) : successOutcome);
+  } };
+  let tree = await settle(capturedExport.TitlePreviewAction, props);
+  const open = collectButtons(tree).find(x => x.text === translate("preview.open"));
+  assert(open && !open.props.disabled, "preview header renders a translated button");
+  await Promise.all([open.props.onClick(), open.props.onClick()]);
+  tree = await flush(capturedExport.TitlePreviewAction, props, tree);
+  assert(calls.length === 1 && calls[0].signal instanceof AbortSignal, "double preview click starts one cancellable command");
+  let text = renderTree(tree).join(" ");
+  assert(text.includes("Old title preview-header") && text.includes("Fix login preview-header") && text.includes(translate("preview.hint")), "dialog shows before/after and persistence boundary");
+  if (translate === tEn) assert(!/[\u4e00-\u9fff]/u.test(text), "English preview UI has no Chinese labels");
+  await scope.mutate([{ op: "set", path: ["lockedSessionIds"], value: [props.sessionId] }]);
+  tree = await flush(capturedExport.TitlePreviewAction, props, tree);
+  assert(collectButtons(tree).find(x => x.text === translate("preview.apply")).props.disabled, "locking disables application of a pending preview");
+  await scope.mutate([{ op: "unset", path: ["lockedSessionIds"] }]);
+  tree = await flush(capturedExport.TitlePreviewAction, props, tree);
+  await collectButtons(tree).find(x => x.text === translate("preview.apply")).props.onClick();
+  tree = await flush(capturedExport.TitlePreviewAction, props, tree);
+  assert(calls.length === 2 && calls[1].line === "/title-apply " + previewValue(props.sessionId).previewId, "apply uses the cached preview token");
+  assert(!findFirstElement(tree, n => n.props?.role === "dialog"), "accepted preview dialog closes");
+}
+console.log("✓ preview UI: bilingual before/after, one in-flight command, lock gate and explicit application");
+
+// StrictMode effect replay and unmount: subscriptions stay live, then clean up;
+// a closed header must cancel its own preview without persisting a title.
+{
+  const subscriptions = new Set();
+  let value = { status: "ready", writable: true, value: { enabled: true }, user: {} }, activeSignal;
+  const trackedScope = { getSnapshot: () => value, subscribe: fn => { subscriptions.add(fn); return () => subscriptions.delete(fn); } };
+  const props = { scope: trackedScope, t: tZh, sessionId: "lifetime", execute: (line, signal) => {
+    activeSignal = signal; return new Promise((resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+  } };
+  let tree = await settle(capturedExport.TitlePreviewAction, props);
+  for (const effect of componentEffects.get(capturedExport.TitlePreviewAction)) {
+    if (!effect) continue; effect.cleanup?.(); effect.cleanup = effect.fn();
+  }
+  assert(subscriptions.size === 1, "StrictMode replay must not accumulate subscriptions");
+  value = { ...value, value: { enabled: true, lockedSessionIds: [props.sessionId] } };
+  for (const notify of subscriptions) notify();
+  tree = await flush(capturedExport.TitlePreviewAction, props, tree);
+  assert(collectButtons(tree)[0].props.disabled, "replayed component still receives effective lock updates");
+  value = { ...value, value: { enabled: true } }; for (const notify of subscriptions) notify();
+  tree = await flush(capturedExport.TitlePreviewAction, props, tree);
+  const pending = collectButtons(tree)[0].props.onClick(); await Promise.resolve();
+  unmount(capturedExport.TitlePreviewAction); await pending;
+  assert(activeSignal.aborted && subscriptions.size === 0, "unmount cancels preview and removes subscription");
+}
+console.log("✓ preview lifecycle: effect replay, inherited locks, cancellation and cleanup");
+
+// Client and Core 0.2 must never poison the runtime policy with oversized lists.
+{
+  const locks = Array.from({ length: 500 }, (_, i) => "locked-" + i);
+  fakeScopeSnapshot = { status: "ready", writable: true, value: { enabled: true, lockedSessionIds: locks }, user: { lockedSessionIds: locks } };
+  const before = scopeMutations.length;
+  let rejected = false; try { await capturedExport.toggleSessionLock(scope, "extra"); } catch { rejected = true; }
+  assert(rejected && scopeMutations.length === before, "501st lock rejected before write");
+  await capturedExport.toggleSessionLock(scope, "locked-0");
+  assert(fakeScopeSnapshot.value.lockedSessionIds.length === 499, "a full lock list still permits unlocking");
+  fakeScopeSnapshot = { status: "ready", writable: true, value: { enabled: true }, user: {} };
+  for (const ops of [
+    [{ op: "set", path: ["titleExclusions"], value: Array.from({ length: 51 }, (_, i) => "term" + i) }],
+    [{ op: "set", path: ["lockedSessionIds"], value: ["id\ncontrol"] }],
+    [{ op: "set", path: ["provider"], value: "unpaired" }],
+    [{ op: "set", path: ["apiKey"], value: "ignored-secret" }]
+  ]) {
+    let error; try { await capturedExport.persistSettings(scope, ops); } catch (e) { error = e; }
+    assert(error, "invalid shared settings write rejected");
+  }
+}
+console.log("✓ settings write guard: 501st lock, oversized exclusions, control characters, incomplete routes and unknown keys");
+
+// Preserve a user's new configured pair even when the mode remains configured.
+fakeScopeSnapshot = routeSnapshot(); liveAttempt = 0;
+fakeRemote.commands.execute = () => {
+  if (++liveAttempt === 1) return Promise.resolve(failureOutcome);
+  face.scope.mutate([{ op: "set", path: ["provider"], value: "new-provider" }, { op: "set", path: ["model"], value: "new-model" }]);
+  return Promise.resolve(successOutcome);
+};
+await face.batch.start([{ sessionId: "new-route-during-fallback" }]);
+assert(fakeScopeSnapshot.value.mode === "configured" && fakeScopeSnapshot.value.model === "new-model", "restoration must preserve a changed configured route");
+fakeScopeSnapshot = routeSnapshot(); liveAttempt = 0;
+fakeRemote.commands.execute = () => {
+  if (++liveAttempt === 1) return Promise.resolve(failureOutcome);
+  return capturedExport.persistSettings(face.scope, [{ op: "set", path: ["mode"], value: "configured" }]).then(() => successOutcome);
+};
+await face.batch.start([{ sessionId: "same-route-user-save" }]);
+assert(fakeScopeSnapshot.value.mode === "configured", "an explicit save of the temporary mode transfers route ownership to the user");
+console.log("✓ fallback restoration: new provider/model and same-value user saves retain ownership");
+
+// Preview and apply use distinct serial operations; preview never triggers the
+// settings-switching fallback, and malformed candidates are not successes.
+{
+  let fallbackCalls = 0;
+  const calls = [];
+  const batch = capturedExport.createBatchController((id, signal, operation, entry) => {
+    calls.push({ id, operation, entry });
+    return Promise.resolve(operation === "preview" ? id === "bad" ? successOutcome : previewResult(previewValue(id, id === "s1" ? 1 : 2)) : successOutcome);
+  }, { runFallback: () => { fallbackCalls++; } });
+  batch.setAutoFallback(true);
+  const result = await batch.start([{ sessionId: "s1" }, { sessionId: "s2" }, { sessionId: "bad" }], "preview");
+  assert(result.previews.length === 2 && result.failed === 1 && result.succeeded === 2 && fallbackCalls === 0, "preview validates candidates and skips fallback");
+  const applied = await batch.start([result.previews[1]], "apply");
+  assert(calls.at(-1).operation === "apply" && calls.at(-1).entry.previewId === result.previews[1].previewId, "application forwards preview token");
+  assert(applied.previews[1].applied && !applied.previews[0].applied, "only successful chosen candidate is marked applied");
+}
+for (const translate of [tZh, tEn]) {
+  const calls = [], batch = capturedExport.createBatchController((id, signal, operation) => {
+    calls.push({ id, operation }); return Promise.resolve(operation === "preview" ? previewResult(previewValue(id, id === "s1" ? 1 : 2)) : successOutcome);
+  });
+  const props = { t: translate, batch, listSessions: uiListSessions, disabled: false };
+  let tree = await settle(capturedExport.BatchTitleOptimizer, props);
+  collectButtons(tree).find(x => x.text === translate("batch.selectAll")).props.onClick();
+  tree = await flush(capturedExport.BatchTitleOptimizer, props, tree);
+  collectButtons(tree).find(x => x.text.startsWith(translate("batch.preview") + " (")).props.onClick();
+  await batch.start([], "preview");
+  tree = await flush(capturedExport.BatchTitleOptimizer, props, tree);
+  const text = renderTree(tree).join(" ");
+  assert(text.includes(translate("batch.comparison")) && text.includes("Old title s1") && text.includes("Fix login s2"), "batch comparison renders actual old and new titles");
+  const comparison = findFirstElement(tree, n => n.props?.key === "comparison");
+  const checkboxes = collectInputs(comparison).filter(x => x.props.type === "checkbox");
+  assert(checkboxes.length === 2, "each comparison can be selected independently");
+  checkboxes[1].props.onChange(); tree = await flush(capturedExport.BatchTitleOptimizer, props, tree);
+  let apply = collectButtons(tree).find(x => x.text.startsWith(translate("batch.applyPreviews")));
+  assert(apply.text.endsWith("(1)"), "deselected preview excluded from application count");
+  collectInputs(tree, "search")[0].props.onChange({ target: { value: "Fix login s1" } });
+  tree = await flush(capturedExport.BatchTitleOptimizer, props, tree);
+  let filteredComparison = findFirstElement(tree, n => n.props?.key === "comparison");
+  assert(collectInputs(filteredComparison, "checkbox").length === 1, "search must match generated candidate titles as well as old titles");
+  collectInputs(tree, "search")[0].props.onChange({ target: { value: "no-matching-candidate" } });
+  tree = await flush(capturedExport.BatchTitleOptimizer, props, tree);
+  filteredComparison = findFirstElement(tree, n => n.props?.key === "comparison");
+  assert(renderTree(filteredComparison).join(" ").includes(translate("batch.noMatches")), "filtered comparison must explain an empty result");
+  apply = collectButtons(tree).find(x => x.text.startsWith(translate("batch.applyPreviews")));
+  assert(apply.text.endsWith("(1)"), "filtering must preserve existing selections and show their total");
+  collectInputs(tree, "search")[0].props.onChange({ target: { value: "" } });
+  tree = await flush(capturedExport.BatchTitleOptimizer, { ...props, lockedSessionIds: ["s1"] }, tree);
+  apply = collectButtons(tree).find(x => x.text.startsWith(translate("batch.applyPreviews")));
+  assert(apply.props.disabled && apply.text.endsWith("(0)"), "a newly locked candidate must be excluded before application");
+  tree = await flush(capturedExport.BatchTitleOptimizer, { ...props, disabled: true }, tree);
+  assert(collectButtons(tree).find(x => x.text.startsWith(translate("batch.applyPreviews"))).props.disabled,
+    "turning off AI must disable the footer application action");
+  tree = await flush(capturedExport.BatchTitleOptimizer, props, tree);
+  apply = collectButtons(tree).find(x => x.text.startsWith(translate("batch.applyPreviews")));
+  apply.props.onClick(); await batch.start([], "apply");
+  tree = await flush(capturedExport.BatchTitleOptimizer, props, tree);
+  assert(calls.filter(x => x.operation === "apply").length === 1 && calls.at(-1).id === "s1", "batch applies only selected title");
+  assert(renderTree(tree).join(" ").includes(translate("preview.applied")), "applied comparison displays confirmation");
+}
+console.log("✓ batch preview/comparison: separate operations, malformed candidate rejection, translated diff and selected application");
+console.log("✓ redesigned comparison: candidate search, empty filters, retained selections, live locks and AI-off application guard in zh/en");
 
 // React rejects an undefined component; the old test double silently accepted it.
 {
@@ -2625,3 +2835,5 @@ console.log("✓ unified save: local drafts, atomic mutation, failure retention 
     throw new Error("Regenerate title references an unavailable refresh icon");
 }
 console.log("✓ regenerate uses a refresh icon exported by the shipped DSH primitives");
+
+console.log("\n✅ ALL CLIENT / I18N TESTS PASSED");

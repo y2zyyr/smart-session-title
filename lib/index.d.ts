@@ -27,6 +27,7 @@ export declare const inject: string[];
  * Loader schema for the composition config. Every field is optional;
  * `resolveTitleConfig` applies documented defaults and strict validation, so a
  * malformed value fails loudly at load instead of degrading a title at run time.
+ * Settings share field bounds with Core 0.1, including list sizes and Unicode lengths.
  */
 /** @see resolveTitleConfig — typed as unknown because the loader validates it at run time. */
 export declare const Config: unknown;
@@ -72,7 +73,10 @@ export interface SmartSessionTitleContext {
     readonly llm: LlmStreamService;
     readonly settings: SettingsService;
     readonly logger?: ProviderLogger | undefined;
+    readonly fiber?: unknown;
     effect(execute: () => unknown, label?: string): unknown;
+    /** Verified host events; subscriptions belong to this plugin's Cordis fiber. */
+    on?(event: string, callback: (...args: any[]) => void): unknown;
     /** Optional child injection: runs only if the named services appear. */
     inject(deps: readonly string[], callback: (ctx: SmartSessionTitleContext & {
         readonly commands: CommandsService;
@@ -93,10 +97,20 @@ export interface SmartSessionTitleContext {
 export declare function apply(ctx: SmartSessionTitleContext, config: unknown): void;
 export { assertTitleCapabilities, findMissingCapabilities } from "./capabilities.js";
 export { createRetitleHandler } from "./commands.js";
-export type { CommandInvocationLike, CommandResultLike, CommandsService } from "./commands.js";
+export type {
+    CommandInvocationLike,
+    CommandResultLike,
+    CommandsService,
+    ExplicitGoalTitleMessage,
+    GoalTitleSessionLike,
+    RetitleRecovery,
+    RetitleRecoverySnapshot
+} from "./commands.js";
 export { RETITLE_COMMAND, RETITLE_DESCRIPTION, STATUS_COMMAND, STATUS_DESCRIPTION } from "./commands.js";
 export { SETTINGS_NAMESPACE };
 export { createExplicitRegenerationTokens } from "./tokens.js";
 export type { ExplicitRegenerationTokens } from "./tokens.js";
 export type { TitleSettings } from "./settings.js";
 export type { TitleConfig } from "./config.js";
+export { PREVIEW_COMMAND, APPLY_PREVIEW_COMMAND } from "./title-preview.js";
+export type { TitlePreview } from "./title-preview.js";

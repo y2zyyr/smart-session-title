@@ -1,17 +1,11 @@
 /**
  * `smart-session-title` — browser half.
  *
- * Contributes ONE lightweight action to the official Session-header slot
- * `conversation.session.header.actions` (kind `list`, scope `session`,
- * `replaceRisk: "none"`, documented as "Title-adjacent Session actions in
- * ascending order").
- *
- * The action does not implement regeneration. It invokes the host command
- * `/retitle` through the SAME public Remote the shipped clients use
- * (`ctx.remote.commands.execute(sessionId, line, [])`, cf.
- * `dsh-client-ui-plan`), so the host runs the real command handler, which calls
- * the real `SessionTitleService.refresh()`. No HTTP server, no DOM patching, no
- * Electron IPC, no React-owner-chain patching.
+ * Contributes preview, regenerate, lock and SessionId actions through
+ * `conversation.session.header.actions`, plus Settings and a batch overlay.
+ * Generation and application invoke host commands through the existing public
+ * `ctx.remote.commands.execute(sessionId, line, [], signal)` contract. Model
+ * calls, title persistence and stale-result guards live on the host.
  *
  * Why hand-written instead of built: a client half is a browser module loaded
  * through `window.__ModuleLoader__.load`, and the packages it needs (`react`,
@@ -19,8 +13,7 @@
  * Bundling would add a toolchain for no benefit, so this file is written
  * directly against that contract — the same shape shipped client plugins use.
  *
- * Styling follows the shipped header-action affordance (a 28px round,
- * transparent, icon-only button) using the design-token custom properties the
+ * Styling uses visible action labels and accessible tooltips using the design-token custom properties the
  * shipped CSS uses (`--dsw-alias-*`). No official stylesheet is modified and no
  * icon library is added.
  */
@@ -41,6 +34,8 @@ window.__ModuleLoader__.load({
 
     /** The command line the host understands. */
     var RETITLE_LINE = "/retitle";
+    var PREVIEW_LINE = "/title-preview";
+    var APPLY_PREVIEW_LINE = "/title-apply";
 
     /**
      * This plugin's version, shown in the settings page footer.
@@ -50,7 +45,7 @@ window.__ModuleLoader__.load({
      * The two are kept in sync deliberately: `validation/verify-i18n.mjs`
      * fails when this string and package.json's `version` drift apart.
      */
-    var PLUGIN_VERSION = "0.5.0-rc.16";
+    var PLUGIN_VERSION = "0.5.0-rc.17";
 
     /**
      * Where the batch block remembers its automatic-fallback checkbox. It is a
@@ -88,7 +83,29 @@ window.__ModuleLoader__.load({
 
     /** Simplified Chinese dictionary (the key-set source of truth). */
     var zh = {
-      "settings.showSessionId": "在对话顶部显示 SessionId",
+      "preview.open": "预览标题",
+      "preview.generating": "正在生成预览…",
+      "preview.applying": "正在应用…",
+      "preview.old": "原标题",
+      "preview.new": "候选标题",
+      "preview.apply": "应用此标题",
+      "preview.close": "关闭",
+      "preview.failed": "标题预览或应用失败",
+      "preview.invalid": "未收到有效的标题预览",
+      "preview.hint": "预览调用模型，但不会保存标题。应用后按人工标题保护；预览一小时内有效，会话或标题设置变化后需重新预览。",
+      "preview.applied": "已应用",
+      "batch.preview": "预览所选",
+      "batch.comparison": "标题对比",
+      "batch.previewHint": "先预览再勾选应用。预览使用当前标题模型设置，不执行自动兜底；已有标题只在应用时改变。",
+      "batch.applyPreviews": "应用所选",
+      "batch.selectPreviews": "全选候选标题",
+      "batch.previewDone": "预览完成",
+      "batch.applying": "正在应用标题",
+      "batch.previewing": "正在生成预览",
+      "batch.applyDone": "应用完成",
+      "batch.clearPreviews": "清空对比",
+      "settings.showSessionId": "显示 Session ID",
+      "settings.sessionIdBrief": "点击对话顶部的 ID 可复制，方便定位会话。",
       "settings.showSessionIdHint": "默认开启。点击浅灰色会话 ID 可复制完整值，粘贴到其他对话可帮助 agent 定位此会话。能否读取取决于 agent 的工具与权限；复制其他会话的 ID 需先打开该会话。此开关独立于 AI 标题生成。",
       "sessionId.copy": "复制当前会话 SessionId",
       "sessionId.copied": "已复制",
@@ -111,18 +128,32 @@ window.__ModuleLoader__.load({
       "lock.short": "锁定标题",
       "lock.active": "标题已锁定",
       "action.help": "用当前标题设置重新生成此会话的标题，会覆盖人工修改的标题；不会刷新或重新运行对话。",
-      "lock.help": "阻止本插件自动生成、手动重新生成和批量修改此标题；不会锁定对话，仍可聊天和人工改名。",
+      "lock.help": "阻止本插件自动生成、重新生成、预览、应用和批量修改此标题；不会锁定对话，仍可聊天和人工改名。",
       "lock.unlockHelp": "解除标题锁定，允许本插件再次生成或批量修改此标题。",
       "settings.headerActions": "使用说明",
       "settings.lockBoundary": "标题锁定不影响 DSH 的兜底标题或人工改名。锁定后，先解锁才能重新生成标题。",
 
       "settings.saving": "保存中…",
       "settings.saved": "已保存",
+      "settings.unsaved": "有未保存的修改",
       "settings.preferences": "标题设置",
       "settings.expression": "表达方式",
       "settings.lengthDate": "长度与日期",
-      "batch.open": "打开批量优化 →",
-      "batch.back": "← 返回标题设置",
+      "batch.open": "批量优化",
+      "batch.back": "标题设置",
+      "settings.tagline": "让会话标题更清晰、更好找",
+      "settings.brand": "smart-session-title",
+      "settings.enabledHint": "自动为会话生成标题",
+      "settings.currentHint": "使用当前会话的模型",
+      "batch.tagline": "先预览，再选择要应用的标题",
+      "batch.chooseSessions": "重新选择会话",
+      "batch.selectedPreviews": "已勾选候选标题",
+      "batch.notSaved": "当前标题尚未更改",
+      "batch.previewBrief": "预览会调用模型，应用后才保存标题。",
+      "batch.directOptions": "直接优化与兜底设置",
+      "batch.noMatches": "没有符合筛选条件的会话。",
+      "batch.selectSession": "选择会话",
+      "batch.selectCandidate": "选择候选标题",
       "batch.search": "搜索标题或会话 ID",
       "settings.modelHelp": "模型如何使用提示？",
       "settings.preview": "格式示例（不调用模型）",
@@ -133,7 +164,7 @@ window.__ModuleLoader__.load({
       "settings.unavailable": "当前浏览器中无法使用此设置。",
       "settings.loading": "正在加载…",
       "settings.enabled": "AI 标题生成",
-      "settings.subtitle": "修改后点击「保存设定」生效。",
+      "settings.subtitle": "修改后点击「保存设置」生效。",
       "settings.defaultLength": "默认字数",
       "settings.characterUnit": "字",
       "settings.defaultParameters": "默认超时与重试",
@@ -156,28 +187,28 @@ window.__ModuleLoader__.load({
       "settings.modelNotServedSuggestion": "应改选模型 ID：",
       "settings.directoryUnavailable": "无法读取 DSH 的模型目录，请手动填写 Provider 与模型 ID。",
       "settings.configuredNotice": "压缩后的首条提示将发送给所选 Provider。",
-      "settings.configuredUnsaved": "选择 Provider 和模型后，点击「保存设定」生效。",
-      "settings.saveRoute": "保存设定",
+      "settings.configuredUnsaved": "选择 Provider 和模型后，点击「保存设置」生效。",
+      "settings.saveRoute": "保存设置",
       "settings.invalidNumber": "请输入范围内的整数：",
       "settings.saveFailed": "设置保存失败。请检查填写内容与 DSH 日志。",
       "settings.disabledNote": "AI 标题已关闭。DSH 仍会根据首条提示设置 fallback 标题，人工重命名不受影响。",
-      "settings.advanced": "高级",
+      "settings.advanced": "高级设置",
       "settings.timeout": "超时（毫秒）",
       "settings.maxAttempts": "最大尝试次数",
       "settings.advancedHint": "留空使用默认配置，下次生成时生效。",
       "settings.version": "版本",
       // Title shape + content: cap, date affix, style, language, exclusions ----
       "settings.shapeLegend": "标题规则",
-      "settings.style": "风格",
+      "settings.style": "标题风格",
       "settings.styleDefault": "动作＋对象（默认）",
       "settings.styleShortName": "简短任务名",
       "settings.styleActionObject": "动作＋对象",
-      "settings.language": "语言",
+      "settings.language": "标题语言",
       "settings.languageAuto": "跟随任务语言",
       "settings.languageZh": "中文",
       "settings.languageEn": "英文",
       "settings.contentHint": "「自动」跟随任务内容的主要语言；技术名称（React、API 等）保持原样。风格与语言适用于自动生成、手动重新生成和批量处理；改动不会重写已有标题。",
-      "settings.maxCharacters": "标题最大字数",
+      "settings.maxCharacters": "字数上限",
       "settings.dateAffix": "日期位置",
       "settings.dateAffixOff": "不添加",
       "settings.dateAffixPrefix": "前缀",
@@ -185,22 +216,22 @@ window.__ModuleLoader__.load({
       "settings.dateFormat": "日期格式",
       "settings.dateFormatYmd": "年月日 · 2026-09-14",
       "settings.dateFormatMd": "月日 · 09-14",
-      "settings.shapeHint": "字数上限留空表示继承部署配置（80 字节，约 26 个汉字或 80 个西文字符）。日期取会话创建时间（本地时区），重新生成标题不会改变它；选择后缀时，字数会先为日期留出空间，确保日期不被截掉。",
-      "settings.exclusions": "标题排除词",
+      "settings.shapeHint": "字数上限留空表示继承部署配置（80 字节，约 26 个汉字或 80 个西文字符）。日期取会话创建时间（本地时区），重新生成标题不会改变它；选择后缀时，字数上限包含日期；无法为正文留出至少 4 个字符，或日期命中排除词时省略日期。",
+      "settings.exclusions": "排除词",
       "settings.exclusionsBrief": "每行一个，最多 50 个。仅限插件生成的标题；不影响兜底标题、人工标题或对话原文。",
-      "settings.exclusionsPlaceholder": "每行一个，例如：\n客户甲\n内部项目代号",
+      "settings.exclusionsPlaceholder": "每行一个，生成时自动移除",
       "settings.exclusionsSummary": "排除词",
       "settings.exclusionsHint": "这些词会在生成前从提示文本中删除，生成后再检查一次；标题里仍出现时先重试一次，最后一次直接删掉该词，而不是放弃这个标题。按字面匹配，含英文字母时忽略大小写；别名、缩写、译名需分别添加。",
       "settings.invalidExclusions": "每个排除词一行、不超过 64 个字符，最多 50 个。",
       "settings.exclusionsBoundary": "只约束本插件生成的标题：DSH 的兜底标题（新会话在模型回答前显示的就是它）、你手动改过的标题和对话原文都不受此设置影响。",
       // Batch: optimize past titles ---------------------------------
-      "batch.legend": "批量优化历史标题",
+      "batch.legend": "批量优化标题",
       "batch.intro": "仅处理选中的会话，也会覆盖人工修改的标题。",
-      "batch.costHint": "每个会话一次模型调用：选得越多越慢，并产生相应的模型费用。",
+      "batch.costHint": "每次生成都可能按「最大尝试次数」重试，自动兜底还会增加调用。预览同样调用模型；应用预览不再次调用。",
       "batch.routeHint": "「跟随会话」会使用每个会话自己记录的模型；旧会话记录的模型可能已不存在或凭据失效，此时改成「固定模型」再重试即可。",
       "batch.retryFailed": "重试失败项",
       "batch.fallback": "失败后自动用「固定模型」重跑一次",
-      "batch.fallbackHint": "仅在已保存「固定模型」时可用：重跑期间标题路由会临时切到该模型，结束后自动恢复原设置（中途刷新窗口可能停在切换后的状态）。",
+      "batch.fallbackHint": "仅在已保存「固定模型」时可用：重跑期间标题路由会临时切到该模型，结束后恢复原模式；处理中用户保存的新路由会保留。中途刷新窗口可能停在临时模式。",
       "batch.fallbackNeedsRoute": "先在「标题模型」里选好并保存「固定模型」，才能启用自动兜底。",
       "batch.fallbackRunning": "正在用「固定模型」自动重跑失败项…",
       "batch.fallbackDone": "已用「固定模型」自动重跑失败项。",
@@ -223,7 +254,7 @@ window.__ModuleLoader__.load({
       "batch.selectAll": "全选",
       "batch.clear": "清空",
       "batch.selectedCount": "已选",
-      "batch.start": "开始优化",
+      "batch.start": "直接优化",
       "batch.cancel": "停止",
       "overlay.running": "批量优化",
       "overlay.stop": "停止",
@@ -248,7 +279,29 @@ window.__ModuleLoader__.load({
 
     /** English dictionary, key-identical to the Chinese source of truth. */
     var en = {
-      "settings.showSessionId": "Show SessionId in the conversation header",
+      "preview.open": "Preview title",
+      "preview.generating": "Generating preview…",
+      "preview.applying": "Applying…",
+      "preview.old": "Previous title",
+      "preview.new": "Candidate title",
+      "preview.apply": "Apply this title",
+      "preview.close": "Close",
+      "preview.failed": "Title preview or application failed",
+      "preview.invalid": "No valid title preview was returned",
+      "preview.hint": "Preview calls the model without saving a title. Applying protects it as a manual title. Previews expire after one hour; session or title setting changes require a new preview.",
+      "preview.applied": "Applied",
+      "batch.preview": "Preview selected",
+      "batch.comparison": "Title comparison",
+      "batch.previewHint": "Preview, then select titles to apply. Preview uses the current title route without automatic fallback. Existing titles change only on application.",
+      "batch.applyPreviews": "Apply selected",
+      "batch.selectPreviews": "Select all candidates",
+      "batch.previewDone": "Preview complete",
+      "batch.applying": "Applying titles",
+      "batch.previewing": "Generating previews",
+      "batch.applyDone": "Application finished",
+      "batch.clearPreviews": "Clear comparison",
+      "settings.showSessionId": "Show Session ID",
+      "settings.sessionIdBrief": "Click the ID in the conversation header to copy and locate a session.",
       "settings.showSessionIdHint": "On by default. Click the muted session ID to copy its full value, then paste it into another conversation to help an agent locate this session. Reading requires suitable tools and permissions. Open another session to copy its ID. This switch is independent of AI title generation.",
       "sessionId.copy": "Copy current session ID",
       "sessionId.copied": "Copied",
@@ -271,7 +324,7 @@ window.__ModuleLoader__.load({
       "lock.short": "Lock title",
       "lock.active": "Title locked",
       "action.help": "Generate a new title using the current title settings, replacing manual titles too. Does not refresh or rerun the conversation.",
-      "lock.help": "Prevent automatic, manual and batch title generation by this plugin. You can still chat and rename the conversation yourself.",
+      "lock.help": "Prevent this plugin from generating, previewing, applying or batch retitling this title. You can still chat and rename the conversation yourself.",
       "lock.unlockHelp": "Unlock this title to allow generation and batch retitling again.",
       "settings.headerActions": "Usage guide",
       "settings.lockBoundary": "Title locking does not affect DSH fallback titles or manual renaming. Unlock before regenerating a title.",
@@ -279,11 +332,25 @@ window.__ModuleLoader__.load({
       // Settings page ----------------------------------------------
       "settings.saving": "Saving\u2026",
       "settings.saved": "Saved",
+      "settings.unsaved": "Unsaved changes",
       "settings.preferences": "Title settings",
       "settings.expression": "Expression",
       "settings.lengthDate": "Length and date",
-      "batch.open": "Open batch optimizer \u2192",
-      "batch.back": "\u2190 Back to title settings",
+      "batch.open": "Batch optimize",
+      "batch.back": "Title settings",
+      "settings.tagline": "Clearer titles, easier to find",
+      "settings.brand": "smart-session-title",
+      "settings.enabledHint": "Automatically generate session titles",
+      "settings.currentHint": "Use each session's own model",
+      "batch.tagline": "Preview first, then choose titles to apply",
+      "batch.chooseSessions": "Change session selection",
+      "batch.selectedPreviews": "Selected candidate titles",
+      "batch.notSaved": "Current titles have not changed",
+      "batch.previewBrief": "Preview calls the model. Titles are saved only when applied.",
+      "batch.directOptions": "Direct optimization and fallback",
+      "batch.noMatches": "No sessions match these filters.",
+      "batch.selectSession": "Select session",
+      "batch.selectCandidate": "Select candidate title",
       "batch.search": "Search titles or session IDs",
       "settings.modelHelp": "How is the prompt used?",
       "settings.preview": "Format example (no model call)",
@@ -292,7 +359,7 @@ window.__ModuleLoader__.load({
       "settings.unavailable": "Settings are unavailable in this browser.",
       "settings.loading": "Loading…",
       "settings.enabled": "AI title generation",
-      "settings.subtitle": "Expand a section to adjust its settings.",
+      "settings.subtitle": "Change settings, then click Save settings to apply.",
       "settings.defaultLength": "Default length",
       "settings.characterUnit": "characters",
       "settings.defaultParameters": "Default timeout and retries",
@@ -315,7 +382,7 @@ window.__ModuleLoader__.load({
       "settings.modelNotServedSuggestion": "Select instead:",
       "settings.directoryUnavailable": "Could not read the DSH model directory; enter the provider and model IDs manually.",
       "settings.configuredNotice": "The compressed first prompt is sent to this provider.",
-      "settings.configuredUnsaved": "Not saved yet: choose a provider and model, then click \"Save configured model\".",
+      "settings.configuredUnsaved": "Choose a provider and model, then click \"Save settings\".",
       "settings.saveRoute": "Save settings",
       "settings.invalidNumber": "Enter an integer in this range:",
       "settings.saveFailed": "Settings could not be saved. Check the values and DSH logs.",
@@ -342,24 +409,24 @@ window.__ModuleLoader__.load({
       "settings.dateAffixPrefix": "Prefix",
       "settings.dateAffixSuffix": "Suffix",
       "settings.dateFormat": "Date format",
-      "settings.dateFormatYmd": "年月日 · 2026-09-14",
-      "settings.dateFormatMd": "月日 · 09-14",
-      "settings.shapeHint": "An empty character limit inherits the deployment config (80 bytes: about 26 CJK characters or 80 Latin characters). The date is the session's creation time in local time and does not move when a title is regenerated; a suffix date reserves its own space inside the limit so it is never cut off.",
+      "settings.dateFormatYmd": "Year–month–day · 2026-09-14",
+      "settings.dateFormatMd": "Month–day · 09-14",
+      "settings.shapeHint": "An empty character limit inherits the deployment config (80 bytes: about 26 CJK characters or 80 Latin characters). The date is the session's creation time in local time and does not move when a title is regenerated; the character limit includes the date. The date is omitted when it leaves fewer than 4 body characters or contains an excluded term.",
       "settings.exclusions": "Excluded words",
       "settings.exclusionsBrief": "One per line · Up to 50 words or phrases. Applies only to plugin-generated titles.",
-      "settings.exclusionsPlaceholder": "Acme Corp\ninternal-project-x",
+      "settings.exclusionsPlaceholder": "One per line, removed before generation",
       "settings.exclusionsSummary": "Exclusions",
       "settings.exclusionsHint": "These words are deleted from the prompt text before generation and checked again afterwards: a surviving term is retried once, then deleted from the title on the last attempt rather than giving the title up. Matching is literal, and case-insensitive when the term contains ASCII letters; aliases, abbreviations and translations must be added separately.",
       "settings.invalidExclusions": "Each exclusion takes one line of at most 64 characters, with at most 50 entries.",
       "settings.exclusionsBoundary": "This constrains only titles this plugin generates. DSH's fallback title (what a brand-new session shows until the model answers), titles you renamed yourself, and the conversation itself are unaffected.",
       // Batch: optimize past titles ---------------------------------
-      "batch.legend": "Optimize past titles",
+      "batch.legend": "Batch optimize titles",
       "batch.intro": "Only selected sessions are changed, including manually renamed titles.",
-      "batch.costHint": "One model call per session: the more you select, the slower and the more expensive the run.",
+      "batch.costHint": "Generation can retry up to Max attempts; fallback adds calls. Preview also calls the model; applying a preview makes no new model call.",
       "batch.routeHint": "\"Current session model\" uses the model each session logged. For old sessions that model may no longer exist or its credentials may be gone; switch to \"Configured model\" and retry.",
       "batch.retryFailed": "Retry failed",
       "batch.fallback": "On failure, retry once with the configured model",
-      "batch.fallbackHint": "Needs a saved configured model: the title route switches to it for the retry and is restored afterwards (an interrupted window can leave it switched).",
+      "batch.fallbackHint": "Needs a saved configured model: the title route switches to it for the retry then restores the previous mode while preserving user route saves. Reloading can leave the temporary mode in place.",
       "batch.fallbackNeedsRoute": "Save a configured model first to enable the automatic fallback.",
       "batch.fallbackRunning": "Retrying the failed sessions with the configured model…",
       "batch.fallbackDone": "Failed sessions were retried with the configured model.",
@@ -382,7 +449,7 @@ window.__ModuleLoader__.load({
       "batch.selectAll": "Select all",
       "batch.clear": "Clear",
       "batch.selectedCount": "Selected",
-      "batch.start": "Start",
+      "batch.start": "Optimize directly",
       "batch.cancel": "Stop",
       "overlay.running": "Batch retitle",
       "overlay.stop": "Stop",
@@ -588,102 +655,252 @@ window.__ModuleLoader__.load({
       return react.createElement("details", { className: "sst-card sst-disclosure" },
         react.createElement("summary", {},
           react.createElement("span", {}, title),
-          react.createElement("span", { className: "sst-batch-summary" }, summary)),
+          react.createElement("span", { className: "sst-disclosure-summary" }, summary)),
         react.createElement("div", { className: "sst-disclosure-body" }, content));
     }
 
+    /** Small local SVGs; no additional icon dependency or host CSS changes. */
+    function uiGlyph(kind) {
+      var paths = {
+        search: ["M20 20l-4-4", "M17 10.5a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0"],
+        reload: ["M20 7v5h-5", "M19 12a7 7 0 1 1-2-5l3 3"],
+        model: ["M12 3v3", "M8 3h8", "M7 6h10a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V9a3 3 0 0 1 3-3", "M8 11h.01M16 11h.01M8 16h8", "M1 11v4M23 11v4"],
+        check: ["M5 12l4 4L19 6"],
+        arrow: ["M4 12h16", "M14 6l6 6-6 6"]
+      };
+      return react.createElement("svg", { width: 18, height: 18, viewBox: "0 0 24 24",
+        fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round",
+        "aria-hidden": true, focusable: false },
+        (paths[kind] || []).map(function (path, index) { return react.createElement("path", { key: index, d: path }); }));
+    }
+
+    function switchControl(inputProps) {
+      return react.createElement("span", { className: "sst-switch-control" },
+        react.createElement("input", Object.assign({ type: "checkbox", role: "switch", className: "sst-switch-input" }, inputProps)),
+        react.createElement("span", { className: "sst-switch-track", "aria-hidden": true }));
+    }
+
+    // Scoped to the plugin; native DSH theme tokens also keep dark mode readable.
     var SETTINGS_CSS = `
-.sst-section { padding: 22px 0; border-top: 1px solid var(--dsw-alias-border-l4); }
-.sst-preview { padding: 14px 18px; margin-top: 18px; background: var(--dsw-alias-bg-base); border-left: 3px solid #8abcf4; }
-.sst-preview p { margin: 6px 0 0; font-size: 16px; }
-.sst-settings #sst-maxCharacters { width: 90px !important; }
-.sst-settings [hidden] { display: none !important; }
-.sst-batch { margin-top: 24px; }
-.sst-settings { container-type: inline-size; container-name: sst-settings; width: 100%; min-width: 0; box-sizing: border-box; max-width: 760px; margin: 0 auto; padding: 4px 0 16px; font-size: 13px; line-height: 1.55; color: inherit; }
-.sst-settings * { box-sizing: border-box; }
-.sst-page-heading { margin: 0 0 20px; }
-.sst-page-heading h2 { font-size: 20px; font-weight: 600; margin: 0 0 5px; letter-spacing: -.3px; }
-.sst-page-heading p { color: var(--dsw-alias-label-tertiary); margin: 0; font-size: 12px; }
-.sst-settings .sst-card { border: 1px solid var(--dsw-alias-border-l4); border-radius: 12px; padding: 18px; margin: 0 0 14px; min-width: 0; }
-.sst-model-card { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
-.sst-model-card > * { grid-column: 1 / -1; margin-bottom: 0 !important; }
-.sst-model-card > div { grid-column: auto; }
-.sst-model-card > label { padding-bottom: 14px; border-bottom: 1px solid var(--dsw-alias-border-l4); font-weight: 500; }
-.sst-settings legend { font-size: 14px !important; font-weight: 600 !important; margin-bottom: 12px !important; }
-.sst-mode > label { display: inline-flex !important; border: 1px solid var(--dsw-alias-border-l4); border-radius: 7px; padding: 7px 10px !important; margin: 0 6px 6px 0; gap: 6px; }
-.sst-mode > label:has(input:checked) { background: var(--dsw-alias-bg-base); border-color: var(--dsw-alias-label-tertiary); }
-.sst-settings input, .sst-settings select { accent-color: #8abcf4; max-width: 100%; }
-.sst-settings textarea:focus-visible, .sst-settings input:focus-visible, .sst-settings select:focus-visible, .sst-settings button:focus-visible, .sst-settings summary:focus-visible { outline: 2px solid #8abcf4; outline-offset: 3px; }
-.sst-settings button { min-height: 32px; border-radius: 7px; padding: 6px 12px; border: 1px solid var(--dsw-alias-border-l4); background: var(--dsw-alias-bg-base); color: inherit; cursor: pointer; }
-.sst-settings button:disabled { opacity: .5; cursor: default; }
-.sst-settings .sst-save-route { justify-self: start; padding: 7px 14px; font-weight: 500; }
-.sst-settings .sst-shape { display: flex; flex-direction: column; gap: 18px; margin: 0 !important; min-width: 0; }
-.sst-content-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.sst-date-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.sst-exclusions { border-top: 1px solid var(--dsw-alias-border-l4); padding-top: 16px; }
-.sst-exclusions textarea { display: block; width: 100%; min-height: 88px; line-height: 1.6; padding: 10px 12px; margin-bottom: 8px; }
-.sst-content-fields > div, .sst-date-fields > div { margin-bottom: 0 !important; min-width: 0; }
-.sst-format-help p { margin-bottom: 10px !important; }
-@container sst-settings (max-width: 400px) { .sst-content-fields, .sst-date-fields { grid-template-columns: minmax(0, 1fr); } }
-.sst-shape legend, .sst-shape-summary, .sst-format-help { grid-column: 1 / -1; }
-.sst-shape input, .sst-shape select { width: 100% !important; }
-.sst-settings summary { cursor: pointer; font-size: 12px; color: var(--dsw-alias-label-tertiary); }
-.sst-format-help p { max-width: 62ch; }
-/* Keep fieldset labels accessible without repeating the disclosure heading. */
-.sst-disclosure legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.sst-card:not([open]) { padding-top: 14px; padding-bottom: 14px; }
-.sst-settings > [role=alert] { margin-bottom: 14px; }
-.sst-batch-summary { overflow-wrap: anywhere; }
-.sst-settings .sst-card > summary { color: inherit; font-size: 14px; font-weight: 500; }
-.sst-batch-summary { display: block; margin: 4px 0 0 16px; font-size: 12px; font-weight: 400; color: var(--dsw-alias-label-tertiary); }
-.sst-disclosure-body, .sst-batch-body { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--dsw-alias-border-l4); }
-.sst-batch-help { margin-bottom: 14px; }
-.sst-batch-help[open] summary { margin-bottom: 8px; }
-.sst-settings [role=alert] { border-left: 3px solid #e6a872; padding: 8px 12px; margin: 0; }
-@media (max-width: 640px) { .sst-model-card { grid-template-columns: minmax(0, 1fr); } .sst-settings .sst-shape { grid-template-columns: minmax(0, 1fr); } .sst-settings .sst-card { padding: 14px; } }
-/* Compact settings: labels on the left, controls on the right. */
-.sst-settings { max-width: 640px; padding-top: 0; }
-.sst-page-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-.sst-page-heading h2 { font-size: 17px; margin: 0; }
-.sst-page-heading > label { margin: 0 !important; font-size: 12px; flex-shrink: 0; }
-.sst-section { padding: 14px 0; }
-.sst-settings legend { font-size: 12px !important; margin-bottom: 10px !important; color: var(--dsw-alias-label-tertiary); }
-.sst-model-card { gap: 8px 12px; }
-.sst-model-card > div { display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: center; gap: 8px; grid-column: 1 / -1; }
-.sst-model-card > div label { margin: 0 !important; }
-.sst-model-card select, .sst-model-card input:not([type="radio"]):not([type="checkbox"]) { width: 100% !important; }
-.sst-model-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
-.sst-model-toolbar .sst-mode { margin: 0 !important; min-width: 0; }
-.sst-model-toolbar .sst-mode legend { float: left; margin: 0 10px 0 0 !important; align-self: center; }
-.sst-model-toolbar > button { margin-left: auto; flex-shrink: 0; }
-.sst-mode { display: flex; flex-wrap: wrap; gap: 6px; }
-.sst-mode > label { margin: 0 !important; padding: 0 10px !important; height: 28px; min-height: 28px; white-space: nowrap; flex: 0 0 auto; line-height: 1; }
-.sst-mode input[type="radio"] { width: 13px !important; height: 13px; min-height: 0; margin: 0; flex: 0 0 13px; }
-.sst-settings .sst-shape { gap: 9px; }
-.sst-content-fields, .sst-date-fields { display: flex; flex-direction: column; gap: 9px; }
-.sst-content-fields > div, .sst-date-fields > div { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(130px, 220px); align-items: center; gap: 14px; }
-.sst-content-fields label, .sst-date-fields label { margin: 0 !important; }
-.sst-settings #sst-maxCharacters { width: 90px !important; justify-self: end; }
-.sst-exclusions { border: 0; padding-top: 4px; }
-.sst-exclusions textarea { min-height: 58px; padding: 6px 9px; margin-bottom: 5px; }
-.sst-settings .sst-card { border: 0; border-radius: 0; border-top: 1px solid var(--dsw-alias-border-l4); padding: 11px 0; margin: 0; }
-.sst-settings .sst-card > summary { font-size: 12px; }
-.sst-card > summary .sst-batch-summary { display: inline; margin-left: 10px; }
-.sst-save-status { font-size: 12px; margin: 0; color: var(--dsw-alias-label-tertiary); }
-.sst-save-status:empty { display: none; }
-.sst-usage-help { padding: 10px 0; }
-.sst-usage-help p { font-size: 12px; color: var(--dsw-alias-label-tertiary); line-height: 1.6; }
-.sst-usage-help h4 { font-size: 12px; margin: 12px 0 4px; }
-.sst-batch-entry { padding: 12px 0 0; }
-@container sst-settings (max-width: 340px) {
- .sst-page-heading { align-items: flex-start; flex-direction: column; }
- .sst-content-fields > div, .sst-date-fields > div { grid-template-columns: 1fr; gap: 4px; }
- .sst-settings #sst-maxCharacters { justify-self: start; }
+.sst-settings {
+  --sst-surface: var(--dsw-alias-bg-base, var(--dsw-alias-bg-layer-1, #fff));
+  --sst-border: var(--dsw-alias-border-l4, #e0e5ed);
+  --sst-muted: var(--dsw-alias-label-tertiary, #667085);
+  --sst-accent: #1769e8;
+  --sst-accent-ink: color-mix(in srgb, var(--sst-accent) 70%, var(--dsw-alias-label-primary, #252b37));
+  --sst-tint: color-mix(in srgb, var(--sst-accent) 7%, var(--sst-surface));
+  container-type: inline-size; container-name: sst-settings;
+  width: 100%; max-width: 680px; min-width: 0; margin: 0 auto;
+  padding: 26px 28px 0; border: 1px solid var(--sst-border); border-radius: 14px;
+  background: var(--sst-surface); color: var(--dsw-alias-label-primary, inherit);
+  font-size: 14px; line-height: 1.6; box-sizing: border-box;
 }
+.sst-settings.sst-workspace { max-width: 1040px; }
+.sst-settings *, .sst-settings *::before, .sst-settings *::after { box-sizing: border-box; }
+.sst-settings [hidden] { display: none !important; }
+.sst-settings .sst-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.sst-settings h2, .sst-settings h3, .sst-settings p { overflow-wrap: anywhere; }
+.sst-settings .sst-wordmark { margin: 0 0 4px; color: var(--sst-muted); font-size: 12px; letter-spacing: .1px; }
+.sst-settings .sst-page-heading { margin: 0 0 16px; }
+.sst-settings .sst-page-heading h2 { margin: 0 0 4px; font-size: 23px; font-weight: 650; letter-spacing: -.4px; line-height: 1.4; }
+.sst-settings .sst-page-heading > p:last-child { margin: 0; color: var(--sst-muted); font-size: 14px; }
+.sst-settings .sst-tabs { display: flex; gap: 24px; margin-bottom: 22px; border-bottom: 1px solid var(--sst-border); }
+.sst-settings button {
+  min-height: 40px; padding: 8px 14px; border: 1px solid var(--sst-border); border-radius: 7px;
+  background: var(--sst-surface); color: inherit; font: inherit; font-weight: 500; line-height: 1.4; cursor: pointer;
+}
+.sst-settings button:hover:not(:disabled) { background: color-mix(in srgb, currentColor 4%, var(--sst-surface)); }
+.sst-settings button:disabled { opacity: .45; cursor: default; }
+.sst-settings .sst-tab { margin-bottom: -1px; padding: 10px 4px 13px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--sst-muted); }
+.sst-settings .sst-tab.is-active { border-bottom-color: var(--sst-accent); color: var(--sst-accent-ink); }
+.sst-settings .sst-primary, .sst-settings .sst-save-route { border-color: var(--sst-accent); background: var(--sst-accent); color: #fff; }
+.sst-settings .sst-primary:hover:not(:disabled), .sst-settings .sst-save-route:hover:not(:disabled) { background: #125cd0; }
+.sst-settings .sst-secondary { color: var(--sst-accent-ink); border-color: color-mix(in srgb, var(--sst-accent) 65%, var(--sst-border)); }
+.sst-settings .sst-text-button { border-color: transparent; background: transparent; color: var(--sst-accent-ink); padding-left: 8px; padding-right: 8px; }
+.sst-settings .sst-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 40px; padding: 8px; flex: 0 0 40px; }
+.sst-settings input:not([type=checkbox]):not([type=radio]), .sst-settings select, .sst-settings textarea {
+  width: 100% !important; min-height: 40px; padding: 8px 11px; border: 1px solid var(--sst-border);
+  border-radius: 7px; background: var(--sst-surface); color: inherit; font: inherit; line-height: 1.4; max-width: 100%;
+}
+.sst-settings input::placeholder, .sst-settings textarea::placeholder { color: var(--sst-muted); opacity: .8; }
+.sst-settings input[type=checkbox], .sst-settings input[type=radio] { accent-color: var(--sst-accent); }
+.sst-settings input[type=checkbox]:not(.sst-switch-input) { width: 16px; height: 16px; min-height: 0; margin: 3px 0; flex: 0 0 16px; }
+.sst-settings :is(input, select, textarea, button, summary):focus-visible { outline: 2px solid var(--sst-accent); outline-offset: 3px; }
+.sst-settings :is(input, select, textarea):disabled { cursor: default; opacity: .6; }
+.sst-settings .sst-section { padding: 22px 0; border-top: 1px solid var(--sst-border); }
+.sst-settings .sst-model-section { padding-top: 0; border-top: 0; }
+.sst-settings fieldset { min-width: 0; }
+.sst-settings legend { font-size: 14px !important; font-weight: 600 !important; padding: 0; margin-bottom: 12px !important; }
+.sst-settings .sst-field-label { display: block; margin-bottom: 7px; font-size: 13px; }
+.sst-settings .sst-hint { margin: 6px 0 0; font-size: 12px; line-height: 1.6; color: var(--sst-muted); overflow-wrap: anywhere; }
+.sst-settings .sst-toggle-row { display: flex; justify-content: space-between; align-items: center; gap: 18px; cursor: pointer; }
+.sst-settings .sst-enabled { padding: 2px 0 24px; }
+.sst-settings .sst-toggle-copy { min-width: 0; }
+.sst-settings .sst-toggle-copy .sst-hint { display: block; margin-top: 3px; }
+.sst-settings .sst-toggle-title { display: block; font-weight: 600; }
+.sst-settings .sst-switch-control { position: relative; display: inline-flex; width: 44px; height: 25px; flex: 0 0 44px; }
+.sst-settings .sst-switch-input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; z-index: 1; }
+.sst-settings .sst-switch-track { width: 100%; border-radius: 999px; background: color-mix(in srgb, var(--sst-muted) 32%, var(--sst-surface)); }
+.sst-settings .sst-switch-track::after { content: ""; display: block; width: 19px; height: 19px; border-radius: 50%; background: #fff; margin: 3px; box-shadow: 0 1px 3px #0002; transition: transform .16s ease; }
+.sst-settings .sst-switch-input:checked + .sst-switch-track { background: var(--sst-accent); }
+.sst-settings .sst-switch-input:checked + .sst-switch-track::after { transform: translateX(19px); }
+.sst-settings .sst-switch-input:focus-visible + .sst-switch-track { outline: 2px solid var(--sst-accent); outline-offset: 3px; }
+.sst-settings .sst-switch-input:disabled { cursor: default; }
+.sst-settings .sst-switch-input:disabled + .sst-switch-track { opacity: .45; }
+.sst-settings .sst-mode { margin-bottom: 8px !important; }
+.sst-settings .sst-mode-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border: 1px solid var(--sst-border); border-radius: 7px; overflow: hidden; }
+.sst-settings .sst-mode-options > label { position: relative; display: flex; align-items: center; justify-content: center; padding: 9px 8px; min-height: 40px; font-size: 13px; cursor: pointer; }
+.sst-settings .sst-mode-options > label + label { border-left: 1px solid var(--sst-border); }
+.sst-settings .sst-mode-options > label:has(input:checked) { background: var(--sst-tint); color: var(--sst-accent-ink); box-shadow: inset 0 0 0 1px var(--sst-accent); }
+.sst-settings .sst-mode-options > label:has(input:focus-visible) { outline: 2px solid var(--sst-accent); outline-offset: -3px; }
+.sst-settings .sst-mode-options input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; margin: 0; cursor: inherit; }
+.sst-settings .sst-model-card { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
+.sst-settings .sst-model-card > * { grid-column: 1 / -1; margin: 0 !important; min-width: 0; }
+.sst-settings .sst-model-card > div { grid-column: auto; }
+.sst-settings .sst-model-card:empty { display: none; }
+.sst-settings .sst-shape { display: flex; flex-direction: column; gap: 16px; margin: 0 !important; }
+.sst-settings .sst-content-fields, .sst-settings .sst-date-fields, .sst-settings .sst-advanced-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; }
+.sst-settings .sst-content-fields > div, .sst-settings .sst-date-fields > div, .sst-settings .sst-advanced-fields > div { margin: 0 !important; min-width: 0; }
+.sst-settings .sst-number-field { display: flex; align-items: center; gap: 9px; }
+.sst-settings .sst-number-field input { flex: 1; min-width: 0; }
+.sst-settings .sst-number-field > span { color: var(--sst-muted); font-size: 12px; flex-shrink: 0; }
+.sst-settings .sst-exclusions textarea { display: block; min-height: 76px; resize: vertical; }
+.sst-settings .sst-exclusions > p { display: none; }
+.sst-settings summary { cursor: pointer; font-size: 13px; color: var(--sst-muted); }
+.sst-settings details[open] > summary { margin-bottom: 12px; }
+.sst-settings .sst-card { padding: 16px 0; border-top: 1px solid var(--sst-border); }
+.sst-settings .sst-card > summary { color: inherit; font-weight: 500; }
+.sst-settings .sst-disclosure-body { margin-top: 12px; }
+.sst-settings .sst-disclosure-body > div { margin: 0 !important; padding: 0 !important; }
+.sst-settings .sst-advanced-fields > p { grid-column: 1 / -1; }
+.sst-settings .sst-disclosure-summary { margin-left: 8px; color: var(--sst-muted); font-weight: 400; font-size: 12px; }
+.sst-settings .sst-usage-help { padding: 16px 0; border-top: 1px solid var(--sst-border); }
+.sst-settings .sst-usage-help h4 { font-size: 13px; margin: 14px 0 4px; }
+.sst-settings .sst-usage-help p, .sst-settings .sst-format-help p, .sst-settings .sst-batch-help p { color: var(--sst-muted); font-size: 12px; line-height: 1.7; margin: 8px 0; }
+.sst-settings .sst-save-status { margin: 0; color: var(--sst-muted); font-size: 12px; }
+.sst-settings .sst-save-status:empty { display: none; }
+.sst-settings .sst-footer { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 18px 28px; margin: 8px -28px 0; border-top: 1px solid var(--sst-border); border-radius: 0 0 14px 14px; background: var(--sst-surface); }
+.sst-settings .sst-footer-copy { flex: 1; min-width: 150px; }
+.sst-settings .sst-footer-copy strong { font-size: 13px; font-weight: 600; }
+.sst-settings .sst-version { margin: 0 !important; padding: 0 !important; border: 0 !important; color: var(--sst-muted); font-size: 12px; }
+.sst-settings .sst-footer-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.sst-settings .sst-notice, .sst-settings [role=alert] { padding: 12px 14px; border: 1px solid var(--sst-border); border-radius: 8px; background: color-mix(in srgb, #df9d37 8%, var(--sst-surface)); font-size: 12px; margin: 8px 0 14px; }
+.sst-settings .sst-batch { margin: 0; }
+.sst-settings .sst-route-banner { display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: var(--sst-tint); border-radius: 8px; font-size: 13px; margin-bottom: 16px; overflow-wrap: anywhere; }
+.sst-settings .sst-route-banner svg { color: var(--sst-accent-ink); flex-shrink: 0; }
+.sst-settings .sst-filter-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.sst-settings .sst-search { display: flex; align-items: center; position: relative; flex: 1; min-width: 0; }
+.sst-settings .sst-search svg { position: absolute; left: 12px; color: var(--sst-muted); pointer-events: none; }
+.sst-settings .sst-search input { padding-left: 36px !important; }
+.sst-settings .sst-filter-toolbar > select { width: 32% !important; min-width: 110px; max-width: 260px; text-overflow: ellipsis; }
+.sst-settings .sst-batch-meta { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--sst-muted); font-size: 12px; margin: 6px 0 12px; }
+.sst-settings .sst-selection-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 10px 12px; margin-bottom: 14px; border: 1px solid var(--sst-border); border-radius: 8px; }
+.sst-settings .sst-selection-buttons, .sst-settings .sst-run-buttons { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.sst-settings .sst-selection-buttons button { min-height: 30px; padding: 4px 6px; border: 0; background: transparent; font-size: 13px; }
+.sst-settings .sst-selection-buttons > span { color: var(--sst-muted); font-size: 12px; white-space: nowrap; }
+.sst-settings .sst-session-list { max-height: 300px; overflow-y: auto; border: 1px solid var(--sst-border); border-radius: 8px; margin-bottom: 14px; }
+.sst-settings .sst-session-row { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; cursor: pointer; font-size: 14px; overflow-wrap: anywhere; }
+.sst-settings .sst-session-row + .sst-session-row { border-top: 1px solid var(--sst-border); }
+.sst-settings .sst-session-row:hover { background: var(--sst-tint); }
+.sst-settings .sst-session-row > span { display: flex; flex-direction: column; min-width: 0; }
+.sst-settings .sst-row-title { font-weight: 500; }
+.sst-settings .sst-row-meta { color: var(--sst-muted); font-size: 12px; line-height: 1.6; margin-top: 3px; overflow-wrap: anywhere; }
+.sst-settings .sst-session-picker { margin-bottom: 16px; }
+.sst-settings .sst-session-picker > summary { font-size: 12px; }
+.sst-settings .sst-comparison { margin-top: 8px; }
+.sst-settings .sst-comparison-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
+.sst-settings .sst-comparison-toolbar h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.sst-settings .sst-comparison-toolbar button { min-height: 30px; font-size: 12px; padding: 4px 8px; }
+.sst-settings .sst-comparison-table { border: 1px solid var(--sst-border); border-radius: 9px; overflow: hidden; }
+.sst-settings .sst-comparison-heading, .sst-settings .sst-comparison-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) 20px minmax(0, 1fr); gap: 14px; align-items: center; padding: 12px 16px; }
+.sst-settings .sst-comparison-heading { background: color-mix(in srgb, currentColor 3%, var(--sst-surface)); color: var(--sst-muted); font-size: 12px; font-weight: 500; }
+.sst-settings .sst-comparison-rows { max-height: 420px; overflow-y: auto; }
+.sst-settings .sst-comparison-row { align-items: start; border-top: 1px solid var(--sst-border); padding-top: 16px; padding-bottom: 16px; cursor: pointer; overflow-wrap: anywhere; }
+.sst-settings .sst-comparison-row > div { min-width: 0; }
+.sst-settings .sst-comparison-row input { margin-top: 5px !important; }
+.sst-settings .sst-title-before { font-weight: 500; }
+.sst-settings .sst-title-after { background: var(--sst-tint); padding: 12px 14px; border-radius: 6px; font-weight: 600; }
+.sst-settings .sst-comparison-arrow { align-self: center; color: var(--sst-muted); }
+.sst-settings .sst-mobile-label { display: none; color: var(--sst-muted); font-size: 11px; font-weight: 400; margin-bottom: 4px; }
+.sst-settings .sst-candidate-state { display: block; margin-top: 5px; color: var(--sst-muted); font-size: 12px; font-weight: 400; }
+.sst-settings .sst-batch-progress { padding: 14px 16px; margin-top: 18px; border: 1px solid var(--sst-border); border-radius: 8px; background: var(--sst-tint); }
+.sst-settings .sst-batch-progress.is-success { border-color: color-mix(in srgb, #12a17b 30%, var(--sst-surface)); background: color-mix(in srgb, #12a17b 8%, var(--sst-surface)); }
+.sst-settings .sst-progress-heading { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; }
+.sst-settings .sst-progress-heading > strong { font-size: 13px; font-weight: 600; }
+.sst-settings .sst-progress-title { display: inline-flex; align-items: center; gap: 8px; }
+.sst-settings .sst-success-mark { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: #0c9270; color: #fff; flex-shrink: 0; }
+.sst-settings .sst-progress-heading > span { color: var(--sst-muted); }
+.sst-settings .sst-progress-track { height: 5px; margin: 12px 0; border-radius: 999px; overflow: hidden; background: var(--sst-border); }
+.sst-settings .sst-progress-fill { height: 100%; border-radius: 999px; background: var(--sst-accent); }
+.sst-settings .sst-batch-options, .sst-settings .sst-batch-help { margin: 14px 0; }
+.sst-settings .sst-fallback-choice { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; }
+.sst-settings .sst-empty { padding: 28px 16px; border: 1px dashed var(--sst-border); border-radius: 8px; text-align: center; color: var(--sst-muted); font-size: 13px; }
+@container sst-settings (max-width: 520px) {
+  .sst-settings .sst-filter-toolbar { flex-wrap: wrap; }
+  .sst-settings .sst-search { flex-basis: calc(100% - 50px); }
+  .sst-settings .sst-filter-toolbar > select { order: 3; width: 100% !important; max-width: none; }
+  .sst-settings .sst-selection-toolbar { align-items: flex-start; }
+  .sst-settings .sst-run-buttons { width: 100%; }
+  .sst-settings .sst-comparison-heading { display: none; }
+  .sst-settings .sst-comparison-row { grid-template-columns: 20px minmax(0, 1fr); gap: 10px; }
+  .sst-settings .sst-comparison-row > input { grid-column: 1; grid-row: 1 / 3; }
+  .sst-settings .sst-title-before, .sst-settings .sst-title-after { grid-column: 2; }
+  .sst-settings .sst-comparison-arrow { display: none; }
+  .sst-settings .sst-mobile-label { display: block; }
+  .sst-settings .sst-disclosure-summary { display: none; }
+}
+@container sst-settings (max-width: 360px) {
+  .sst-settings .sst-content-fields, .sst-settings .sst-date-fields, .sst-settings .sst-model-card, .sst-settings .sst-advanced-fields { grid-template-columns: minmax(0, 1fr); }
+  .sst-settings .sst-footer-actions { width: 100%; }
+  .sst-settings .sst-footer-actions > button { flex: 1; }
+}
+@media (max-width: 480px) { .sst-settings { padding: 20px 16px 0; } .sst-settings .sst-footer { margin-left: -16px; margin-right: -16px; padding: 16px; } }
+@media (prefers-reduced-motion: reduce) { .sst-settings .sst-switch-track::after { transition: none; } }
 
 `;
 
     var settingsWrites = new WeakMap();
+    var settingsRouteWrites = new WeakMap();
+
+    // Mirror the shared host constraints before either legacy Settings or
+    // Core 0.2 ConfigForms writes. In particular, never store a 501st lock.
+    function validateSettingsWrite(snapshot, ops) {
+      if (!snapshot || snapshot.status !== "ready" || snapshot.writable === false) throw new Error("settings are not writable");
+      var next = Object.assign({}, snapshot.value || {});
+      var enums = { mode: ["current-session", "configured", "disabled"], titleDatePosition: ["prefix", "suffix"],
+        titleDateFormat: ["ymd", "md"], titleStyle: ["action-object", "short-name"], titleLanguage: ["zh", "en"] };
+      var ranges = { timeoutMs: [1000, 120000], maxAttempts: [1, 3], maxTitleCharacters: [8, 120] };
+      var names = ["enabled", "showSessionId", "provider", "model", "titleExclusions", "lockedSessionIds"].concat(Object.keys(enums), Object.keys(ranges));
+      ops.forEach(function (op) {
+        if (!op || !Array.isArray(op.path) || op.path.length !== 1 || names.indexOf(op.path[0]) === -1 ||
+            (op.op !== "set" && op.op !== "unset")) throw new Error("invalid settings operation");
+        if (op.op === "unset") {
+          if (snapshot.base && Object.prototype.hasOwnProperty.call(snapshot.base, op.path[0])) next[op.path[0]] = snapshot.base[op.path[0]];
+          else delete next[op.path[0]];
+        } else next[op.path[0]] = op.value;
+      });
+      ["enabled", "showSessionId"].forEach(function (key) {
+        if (next[key] !== undefined && typeof next[key] !== "boolean") throw new Error("invalid boolean setting");
+      });
+      Object.keys(enums).forEach(function (key) {
+        if (next[key] !== undefined && enums[key].indexOf(next[key]) === -1) throw new Error("invalid settings choice");
+      });
+      Object.keys(ranges).forEach(function (key) {
+        if (next[key] !== undefined && (!Number.isInteger(next[key]) || next[key] < ranges[key][0] || next[key] > ranges[key][1])) throw new Error("invalid settings range");
+      });
+      ["provider", "model"].forEach(function (key) {
+        if (next[key] !== undefined && (typeof next[key] !== "string" || next[key].trim() === "")) throw new Error("invalid title route");
+      });
+      if ((next.provider === undefined) !== (next.model === undefined) ||
+          (next.mode === "configured" && next.provider === undefined)) throw new Error("incomplete title route");
+      ["titleExclusions", "lockedSessionIds"].forEach(function (key) {
+        var list = next[key];
+        if (list === undefined) return;
+        if (!Array.isArray(list) || list.length > (key === "titleExclusions" ? 50 : 500) || list.some(function (value) {
+          return typeof value !== "string" || Array.from(value.trim()).length > 64 || /[\u0000-\u001f\u007f]/u.test(value);
+        })) throw new Error("invalid settings list");
+      });
+    }
     /**
      * Value equality for the post-write check below.
      *
@@ -706,7 +923,13 @@ window.__ModuleLoader__.load({
     function persistSettings(scope, ops, expectedRevision) {
       var previous = settingsWrites.get(scope) || Promise.resolve();
       var task = previous.catch(function () {}).then(function () {
-        return scope.mutate(ops, expectedRevision);
+        var before = scope.getSnapshot();
+        validateSettingsWrite(before, ops);
+        return Promise.resolve(scope.mutate(ops, expectedRevision === undefined ? before.revision : expectedRevision)).then(function () {
+          if (ops.some(function (op) { return ["mode", "provider", "model"].indexOf(op.path[0]) !== -1; })) {
+            settingsRouteWrites.set(scope, (settingsRouteWrites.get(scope) || 0) + 1);
+          }
+        });
       }).then(function () {
         var snap = scope.getSnapshot();
         if (!snap || snap.status !== "ready" || !ops.every(function (op) {
@@ -720,18 +943,11 @@ window.__ModuleLoader__.load({
       return task;
     }
 
-    /**
-     * Locked session ids recorded in one settings snapshot.
-     *
-     * Read from the RAW user section, which is what the user actually chose: the
-     * resolved value materializes an absent list as `[]`, so it cannot tell "never
-     * locked anything" from "explicitly emptied". Both are "nothing locked" here,
-     * which is why either source would do — the raw section is simply the one that
-     * survives a round trip unchanged.
-     */
+    /** Read effective locks, including inherited Core 0.2 Config values. */
     function lockedIdsOf(snapshot) {
-      var user = snapshot !== null && snapshot !== undefined ? snapshot.user : undefined;
-      var ids = user !== null && user !== undefined ? user.lockedSessionIds : undefined;
+      if (!snapshot) return [];
+      var user = snapshot.user || {};
+      var ids = Object.prototype.hasOwnProperty.call(user, "lockedSessionIds") ? user.lockedSessionIds : (snapshot.value || {}).lockedSessionIds;
       return Array.isArray(ids) ? ids : [];
     }
 
@@ -778,10 +994,23 @@ window.__ModuleLoader__.load({
       );
     }
 
+    function parseTitlePreview(text, sessionId) {
+      try {
+        var candidate = JSON.parse(text);
+        if (!candidate || candidate.kind !== "title-preview" || candidate.sessionId !== sessionId ||
+            typeof candidate.previewId !== "string" || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u.test(candidate.previewId) ||
+            typeof candidate.title !== "string" || candidate.title.trim() === "" ||
+            typeof candidate.previousTitle !== "string" || !Number.isFinite(candidate.expiresAt)) return undefined;
+        return candidate;
+      } catch (error) { return undefined; }
+    }
+
     /** Reset value of the batch runner's snapshot. */
     function idleBatchSnapshot() {
       return {
         status: "idle",
+        operation: "regenerate",
+        previews: [],
         total: 0,
         completed: 0,
         succeeded: 0,
@@ -800,8 +1029,8 @@ window.__ModuleLoader__.load({
     /**
      * Runner for "optimize past titles".
      *
-     * Sequential by design — one `/retitle` at a time — so a run of N sessions
-     * costs exactly N model calls and cannot stampede the provider. Every step
+     * Sequential by design: only one preview, application or `/retitle` runs at a
+     * time. Generations can make several bounded model attempts. Every step
      * goes through the same public Remote the header button uses
      * (`ctx.remote.commands.execute(sessionId, "/retitle")`), whose host side
      * resumes a cold Session on demand before running the real command handler.
@@ -812,8 +1041,8 @@ window.__ModuleLoader__.load({
      * DSH window reload can interrupt a run — and each session that already
      * finished keeps the title it wrote.
      *
-     * @param execute - `(sessionId, signal) => Promise<outcome>`: the `/retitle`
-     *   route. `signal` is a real client-side cancellation: the Remote accepts a
+     * @param execute - `(sessionId, signal, operation, entry) => Promise<outcome>`: the
+     *   preview/apply/regenerate command route. `signal` is a real client-side cancellation: the Remote accepts a
      *   trailing AbortSignal (the descriptor declares `cancellation`), and the
      *   gateway forwards it as the host invocation's cancellation, which aborts
      *   the in-flight generation. That is what makes Stop immediate.
@@ -845,9 +1074,19 @@ window.__ModuleLoader__.load({
         var failures = state.failures.filter(function (failure) {
           return failure.sessionId !== entry.sessionId;
         });
+        var previews = state.previews;
+        if (verdict.kind === "success" && state.operation === "preview") {
+          var candidate = parseTitlePreview(verdict.text, entry.sessionId);
+          if (candidate === undefined) verdict = { kind: "error" };
+          else previews = previews.filter(function (item) { return item.sessionId !== entry.sessionId; }).concat([candidate]);
+        }
         var success = verdict.kind === "success";
+        if (success && state.operation === "apply") previews = previews.map(function (item) {
+          return item.previewId === entry.previewId ? Object.assign({}, item, { applied: true }) : item;
+        });
         if (!success) failures.push({
           sessionId: entry.sessionId,
+          previewId: entry.previewId,
           kind: verdict.kind,
           reason: truncateReason(verdict.text)
         });
@@ -856,6 +1095,7 @@ window.__ModuleLoader__.load({
           succeeded: state.succeeded + (success ? 1 : 0),
           failed: failures.length,
           failures: failures,
+          previews: previews,
           retryCompleted: state.retryCompleted + (retry ? 1 : 0),
           currentSessionId: ""
         });
@@ -869,7 +1109,7 @@ window.__ModuleLoader__.load({
         currentAbort = abort;
         return Promise.resolve()
           .then(function () {
-            return execute(entry.sessionId, abort === null ? undefined : abort.signal);
+            return execute(entry.sessionId, abort === null ? undefined : abort.signal, state.operation, entry);
           })
           .then(
             function (outcome) {
@@ -898,7 +1138,7 @@ window.__ModuleLoader__.load({
           var id = row !== null && row !== undefined ? row.sessionId : undefined;
           if (typeof id !== "string" || id.length === 0 || seen[id] === true) continue;
           seen[id] = true;
-          queue.push({ sessionId: id });
+          queue.push({ sessionId: id, previewId: row.previewId });
         }
         return queue;
       }
@@ -918,7 +1158,7 @@ window.__ModuleLoader__.load({
 
       /** Should this finished pass trigger the one allowed fallback pass? */
       function shouldFallback(result) {
-        return autoFallback === true &&
+        return state.operation === "regenerate" && autoFallback === true &&
           fallbackAttempted === false &&
           cancelled === false &&
           typeof runFallbackHook === "function" &&
@@ -984,7 +1224,7 @@ window.__ModuleLoader__.load({
          * @param rows - `session.list` rows (extra fields are ignored).
          * @returns a promise resolving to the final snapshot.
          */
-        start: function (rows) {
+        start: function (rows, operation) {
           if (inflight !== null) return inflight;
           var queue = buildQueue(rows);
           if (queue.length === 0) return Promise.resolve(state);
@@ -992,7 +1232,8 @@ window.__ModuleLoader__.load({
           // A user-initiated run re-arms the fallback; the fallback pass itself
           // runs through `runPass` and can never re-arm it.
           fallbackAttempted = false;
-          emit({ fallback: "idle" });
+          operation = operation === "preview" || operation === "apply" ? operation : "regenerate";
+          emit({ fallback: "idle", operation: operation, previews: operation === "apply" ? state.previews : [] });
           inflight = runPass(queue)
             .then(function (result) {
               return shouldFallback(result) ? beginFallback(result) : undefined;
@@ -1010,6 +1251,9 @@ window.__ModuleLoader__.load({
               }
             );
           return inflight;
+        },
+        clearPreviews: function () {
+          if (inflight === null) emit({ previews: [] });
         },
         /**
          * Stop now.
@@ -1267,6 +1511,7 @@ window.__ModuleLoader__.load({
         "p",
         {
           key: "version",
+          className: "sst-version",
           style: {
             marginTop: 16,
             marginBottom: 0,
@@ -1278,6 +1523,86 @@ window.__ModuleLoader__.load({
         },
         t("settings.version") + " v" + PLUGIN_VERSION
       );
+    }
+
+    function TitlePreviewAction(props) {
+      var t = translatorOf(props);
+      var scope = props.scope;
+      var snapshotPair = react.useState(function () { return scope === undefined ? undefined : scope.getSnapshot(); });
+      var candidatePair = react.useState(undefined);
+      var pendingPair = react.useState("");
+      var errorPair = react.useState("");
+      var mounted = react.useRef(true);
+      var inflight = react.useRef(null);
+      var dialog = react.useRef(null);
+      react.useEffect(function () {
+        mounted.current = true;
+        candidatePair[1](undefined);
+        errorPair[1]("");
+        pendingPair[1]("");
+        return function () {
+          mounted.current = false;
+          if (inflight.current !== null) inflight.current.abort();
+          inflight.current = null;
+        };
+      }, [props.sessionId]);
+      react.useEffect(function () {
+        if (scope === undefined) return undefined;
+        snapshotPair[1](scope.getSnapshot());
+        return scope.subscribe(function () { if (mounted.current) snapshotPair[1](scope.getSnapshot()); });
+      }, [scope]);
+      var candidate = candidatePair[0];
+      react.useEffect(function () { if (candidate && dialog.current) dialog.current.focus(); }, [candidate]);
+      var disabled = isAiDisabledSnapshot(snapshotPair[0]) || isLockedIn(snapshotPair[0], props.sessionId);
+      function request(operation) {
+        if (inflight.current !== null || disabled || typeof props.execute !== "function") return Promise.resolve();
+        var abort = new AbortController();
+        inflight.current = abort;
+        pendingPair[1](operation);
+        errorPair[1]("");
+        return Promise.resolve().then(function () {
+          return props.execute(operation === "preview" ? PREVIEW_LINE : APPLY_PREVIEW_LINE + " " + candidate.previewId, abort.signal);
+        }).then(function (result) {
+          if (!mounted.current || abort.signal.aborted) return;
+          var verdict = interpretOutcome(result);
+          if (verdict.kind !== "success") throw new Error(truncateReason(verdict.text) || t("preview.failed"));
+          if (operation === "preview") {
+            var value = parseTitlePreview(verdict.text, props.sessionId);
+            if (!value) throw new Error(t("preview.invalid"));
+            candidatePair[1](value);
+          } else candidatePair[1](undefined);
+        }).catch(function (error) {
+          if (mounted.current && !abort.signal.aborted) errorPair[1](t("preview.failed") + (error && error.message ? ": " + truncateReason(error.message) : ""));
+        }).finally(function () {
+          if (inflight.current === abort) inflight.current = null;
+          if (mounted.current && !abort.signal.aborted) pendingPair[1]("");
+        });
+      }
+      var pending = pendingPair[0];
+      var reason = isLockedIn(snapshotPair[0], props.sessionId) ? t("action.locked") : isAiDisabledSnapshot(snapshotPair[0]) ? t("action.disabled") : t("preview.open");
+      var buttonStyle = { border: "1px solid var(--dsw-alias-border-l4)", background: "var(--dsw-alias-bg-base)", color: "inherit", borderRadius: 6, padding: "4px 8px", fontSize: 12, cursor: "pointer" };
+      return react.createElement("span", { className: "sst-preview-action" },
+        react.createElement("button", { type: "button", style: buttonStyle, title: reason,
+          disabled: disabled || !!pending || typeof props.execute !== "function", onClick: function () { return request("preview"); } },
+          pending === "preview" ? t("preview.generating") : t("preview.open")),
+        candidate ? react.createElement("div", { role: "dialog", "aria-label": t("preview.open"), tabIndex: -1, ref: dialog,
+          onKeyDown: function (event) { if (event.key === "Escape" && !pending) candidatePair[1](undefined); },
+          style: { position: "fixed", zIndex: 10000, top: 72, right: 16, width: "min(420px, calc(100vw - 32px))", boxSizing: "border-box", padding: 16,
+            border: "1px solid var(--dsw-alias-border-l4)", borderRadius: 10, background: "var(--dsw-alias-bg-base)", color: "inherit", whiteSpace: "normal", boxShadow: "0 8px 30px #0003", maxHeight: "calc(100vh - 100px)", overflowY: "auto" } },
+          react.createElement("strong", {}, t("preview.open")),
+          react.createElement("p", { style: HINT_STYLE }, t("preview.hint")),
+          react.createElement("dl", { style: { margin: "12px 0", overflowWrap: "anywhere" } },
+            react.createElement("dt", { style: HINT_STYLE }, t("preview.old")),
+            react.createElement("dd", { style: { margin: "4px 0 12px" } }, candidate.previousTitle || t("batch.noTitle")),
+            react.createElement("dt", { style: HINT_STYLE }, t("preview.new")),
+            react.createElement("dd", { style: { margin: "4px 0 12px", fontWeight: 500 } }, candidate.title)),
+          react.createElement("div", { style: { display: "flex", gap: 8 } },
+            react.createElement("button", { type: "button", style: buttonStyle, disabled: disabled || !!pending,
+              onClick: function () { return request("apply"); } }, pending === "apply" ? t("preview.applying") : t("preview.apply")),
+            react.createElement("button", { type: "button", style: buttonStyle, disabled: !!pending,
+              onClick: function () { candidatePair[1](undefined); errorPair[1](""); } }, t("preview.close"))),
+          errorPair[0] ? react.createElement("p", { role: "alert", style: HINT_STYLE }, errorPair[0]) : null)
+          : errorPair[0] ? react.createElement("span", { role: "alert", style: HINT_STYLE }, errorPair[0]) : null);
     }
 
     function RegenerateTitleAction(props) {
@@ -1300,6 +1625,7 @@ window.__ModuleLoader__.load({
 
       var mounted = react.useRef(true);
       react.useEffect(function () {
+        mounted.current = true;
         return function () {
           mounted.current = false;
         };
@@ -1458,6 +1784,7 @@ window.__ModuleLoader__.load({
 
       var mounted = react.useRef(true);
       react.useEffect(function () {
+        mounted.current = true;
         return function () {
           mounted.current = false;
         };
@@ -1643,10 +1970,11 @@ window.__ModuleLoader__.load({
       var settingsIntegrationMounted = false;
 
       var batch = createBatchController(
-        function (sessionId, signal) {
+        function (sessionId, signal, operation, entry) {
           // The 4th argument is the optional AbortSignal the descriptor's
           // `cancellation` field allows; it is what makes Stop immediate.
-          return ctx.remote.commands.execute(sessionId, RETITLE_LINE, [], signal);
+          var line = operation === "preview" ? PREVIEW_LINE : operation === "apply" ? APPLY_PREVIEW_LINE + " " + entry.previewId : RETITLE_LINE;
+          return ctx.remote.commands.execute(sessionId, line, [], signal);
         },
         {
           /**
@@ -1679,22 +2007,27 @@ window.__ModuleLoader__.load({
               return Promise.reject(new Error("no configured title route to fall back to"));
             }
             var previousMode = (snapshot.user || {}).mode;
+            var routeEpoch;
             var changed = false;
             var unsubscribe = function () {};
             function restore() {
               unsubscribe();
               var current = settingsScope.getSnapshot();
               if (changed || !current || current.status !== "ready" ||
-                  (current.value || {}).mode !== "configured") return Promise.resolve();
+                  (current.value || {}).mode !== "configured" ||
+                  (current.value || {}).provider !== provider || (current.value || {}).model !== model ||
+                  (settingsRouteWrites.get(settingsScope) || 0) !== routeEpoch) return Promise.resolve();
               return persistSettings(settingsScope, [previousMode === undefined
                 ? { op: "unset", path: ["mode"] }
                 : { op: "set", path: ["mode"], value: previousMode }], current.revision);
             }
             return persistSettings(settingsScope, [{ op: "set", path: ["mode"], value: "configured" }], snapshot.revision)
               .then(function () {
+                routeEpoch = settingsRouteWrites.get(settingsScope) || 0;
                 unsubscribe = settingsScope.subscribe(function () {
                   var current = settingsScope.getSnapshot();
-                  if (!current || current.status !== "ready" || (current.value || {}).mode !== "configured") changed = true;
+                  if (!current || current.status !== "ready" || (current.value || {}).mode !== "configured" ||
+                      (current.value || {}).provider !== provider || (current.value || {}).model !== model) changed = true;
                 });
                 return Promise.resolve().then(function () { return runPass(failures); })
                   .then(restore, function (error) {
@@ -1763,6 +2096,14 @@ window.__ModuleLoader__.load({
 
       function registerSessionActionSlots() {
         return [
+          ctx.slots.inject("conversation.session.header.actions", function () {
+            return ctx.slots.register({ name: "conversation.session.header.actions", id: "smart-session-title-preview", order: 29,
+              label: "Preview title", locale: NS, inject: function (sessionId) {
+                return { sessionId: sessionId, scope: settingsScope, execute: function (line, signal) {
+                  return ctx.remote.commands.execute(sessionId, line, [], signal);
+                } };
+              } }, TitlePreviewAction);
+          }),
           ctx.slots.inject("conversation.session.header.actions", function () {
             return ctx.slots.register(
               {
@@ -1917,10 +2258,15 @@ window.__ModuleLoader__.load({
     exports.createRegenerationController = createRegenerationController;
     exports.interpretOutcome = interpretOutcome;
     exports.RegenerateTitleAction = RegenerateTitleAction;
+    exports.TitlePreviewAction = TitlePreviewAction;
+    exports.parseTitlePreview = parseTitlePreview;
+    exports.PREVIEW_LINE = PREVIEW_LINE;
+    exports.APPLY_PREVIEW_LINE = APPLY_PREVIEW_LINE;
     exports.LockTitleAction = LockTitleAction;
     exports.SessionIdAction = SessionIdAction;
     exports.lockedIdsOf = lockedIdsOf;
     exports.toggleSessionLock = toggleSessionLock;
+    exports.persistSettings = persistSettings;
     exports.isLockedIn = isLockedIn;
     exports.isAiDisabledSnapshot = isAiDisabledSnapshot;
     /**
@@ -1963,7 +2309,10 @@ window.__ModuleLoader__.load({
       var exclusionDraft = exclusionDraftPair[0];
       var setExclusionDraft = exclusionDraftPair[1];
       var errorPair = react.useState("");
-      var error = errorPair[0];
+      // Keep message keys in state so an open page follows locale changes.
+      var issue = errorPair[0];
+      var error = issue && typeof issue === "object"
+        ? t(issue.key) + (issue.detail ? " " + issue.detail : "") : issue;
       var setError = errorPair[1];
       // Provider directory + configured models. `undefined` until the first
       // load resolves; the selectors fall back to manual entry meanwhile.
@@ -1992,24 +2341,24 @@ window.__ModuleLoader__.load({
         if (mode === "configured") {
           var provider = String(draft.provider !== undefined ? draft.provider : (snap.value || {}).provider || "").trim();
           var model = String(draft.model !== undefined ? draft.model : (snap.value || {}).model || "").trim();
-          if (!provider || !model) { setError(t("settings.configuredUnsaved")); return; }
+          if (!provider || !model) { setError({ key: "settings.configuredUnsaved" }); return; }
           ops = ops.filter(function (op) { return ["mode", "provider", "model"].indexOf(op.path[0]) === -1; });
           ops.push({ op: "set", path: ["mode"], value: mode }, { op: "set", path: ["provider"], value: provider }, { op: "set", path: ["model"], value: model });
         }
         if (!ops.length) return;
         setError("");
         savingPair[1](true);
-        statusPair[1](t("settings.saving"));
+        statusPair[1]("settings.saving");
         return persistSettings(scope, ops).then(function () {
           pendingRef.current = {};
           pendingPair[1]({});
           setDraft({});
           setExclusionDraft(undefined);
           setSnap(scope.getSnapshot());
-          statusPair[1](t("settings.saved"));
+          statusPair[1]("settings.saved");
         }).catch(function () {
           statusPair[1]("");
-          setError(t("settings.saveFailed"));
+          setError({ key: "settings.saveFailed" });
         }).finally(function () { savingPair[1](false); });
       }
 
@@ -2096,17 +2445,8 @@ window.__ModuleLoader__.load({
       var chosenMode = typeof user.mode === "string" ? user.mode : undefined;
       var effectiveMode = draft.mode || chosenMode || value.mode || "current-session";
 
-      var fieldStyle = {
-        minHeight: 34,
-        boxSizing: "border-box",
-        padding: "4px 8px",
-        borderRadius: 6,
-        border: "1px solid var(--dsw-alias-border-l4)",
-        background: busy ? "transparent" : "var(--dsw-alias-bg-base)",
-        color: "inherit",
-        fontSize: 13
-      };
-      var labelStyle = { display: "block", marginBottom: 7, fontSize: 12 };
+      var fieldStyle = { minHeight: 40 };
+      var labelStyle = { display: "block", marginBottom: 7, fontSize: 13 };
       var hintStyle = {
         fontSize: 12,
         color: "var(--dsw-alias-label-tertiary)",
@@ -2120,7 +2460,7 @@ window.__ModuleLoader__.load({
         if (raw !== "" && limits[field]) {
           var parsed = Number(raw);
           if (!Number.isInteger(parsed) || parsed < limits[field][0] || parsed > limits[field][1]) {
-            invalidRef.current[field] = t("settings.invalidNumber") + " " + limits[field][0] + "–" + limits[field][1];
+            invalidRef.current[field] = { key: "settings.invalidNumber", detail: limits[field][0] + "–" + limits[field][1] };
             setError(invalidRef.current[field]);
             return;
           }
@@ -2146,22 +2486,22 @@ window.__ModuleLoader__.load({
       function writeExclusions(text) {
         delete invalidRef.current.titleExclusions;
         var terms = [];
-        var seen = {};
+        var seen = Object.create(null);
         var lines = String(text).split("\n");
         for (var index = 0; index < lines.length; index += 1) {
           var trimmed = lines[index].trim();
           if (trimmed === "" || seen[trimmed] === true) continue;
           if (Array.from(trimmed).length > EXCLUSION_LIMITS.maxCharacters) {
-            invalidRef.current.titleExclusions = t("settings.invalidExclusions");
-            setError(t("settings.invalidExclusions"));
+            invalidRef.current.titleExclusions = { key: "settings.invalidExclusions" };
+            setError(invalidRef.current.titleExclusions);
             return undefined;
           }
           seen[trimmed] = true;
           terms.push(trimmed);
         }
         if (terms.length > EXCLUSION_LIMITS.maxTerms) {
-          invalidRef.current.titleExclusions = t("settings.invalidExclusions");
-          setError(t("settings.invalidExclusions"));
+          invalidRef.current.titleExclusions = { key: "settings.invalidExclusions" };
+          setError(invalidRef.current.titleExclusions);
           return undefined;
         }
         if (terms.length === 0) return save([{ op: "unset", path: ["titleExclusions"] }]);
@@ -2169,39 +2509,32 @@ window.__ModuleLoader__.load({
       }
 
       var children = [];
-      var sessionIdSetting = react.createElement("div", { key: "showSessionId", style: { marginBottom: 16 } },
-        react.createElement("label", { style: { display: "flex", gap: 8, alignItems: "center", marginBottom: 4 } },
-          react.createElement("input", {
-            id: "sst-showSessionId", type: "checkbox", checked: user.showSessionId !== false, disabled: busy,
-            "aria-describedby": "sst-showSessionId-hint",
-            onChange: function (event) { return save([{ op: "set", path: ["showSessionId"], value: event.target.checked }]); }
-          }), t("settings.showSessionId")),
-        react.createElement("p", { id: "sst-showSessionId-hint", style: HINT_STYLE }, t("settings.showSessionIdHint"))
-      );
+      var sessionIdSetting = react.createElement("label", { key: "showSessionId", className: "sst-toggle-row" },
+        react.createElement("span", { className: "sst-toggle-copy" },
+          react.createElement("span", { className: "sst-toggle-title" }, t("settings.showSessionId")),
+          react.createElement("span", { id: "sst-showSessionId-hint", className: "sst-hint" }, t("settings.sessionIdBrief"))),
+        switchControl({
+          id: "sst-showSessionId", checked: user.showSessionId !== false, disabled: busy,
+          "aria-label": t("settings.showSessionId"), "aria-describedby": "sst-showSessionId-hint",
+          onChange: function (event) { return save([{ op: "set", path: ["showSessionId"], value: event.target.checked }]); }
+        }));
 
       children.push(
         react.createElement(
           "label",
-          {
-            key: "enabled",
-            style: {
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              marginBottom: 12,
-              cursor: busy ? "default" : "pointer"
-            }
-          },
-          react.createElement("input", {
-            type: "checkbox",
+          { key: "enabled", className: "sst-toggle-row sst-enabled" },
+          react.createElement("span", { className: "sst-toggle-copy" },
+            react.createElement("span", { className: "sst-toggle-title" }, t("settings.enabled")),
+            react.createElement("span", { className: "sst-hint" }, t("settings.enabledHint"))),
+          switchControl({
+            "aria-label": t("settings.enabled"),
             checked: enabled && effectiveMode !== "disabled",
             disabled: busy,
             onChange: function (event) {
               save([{ op: "set", path: ["enabled"], value: event.target.checked }].concat(event.target.checked && effectiveMode === "disabled" ? [{ op: "set", path: ["mode"], value: "current-session" }] : []));
               if (event.target.checked && effectiveMode === "disabled") setDraft(Object.assign({}, draft, { mode: "current-session" }));
             }
-          }),
-          t("settings.enabled")
+          })
         )
       );
 
@@ -2218,19 +2551,12 @@ window.__ModuleLoader__.load({
             { style: { fontWeight: 500, marginBottom: 4, padding: 0, fontSize: 13 } },
             t("settings.modelLegend")
           ),
-          ["current-session", "configured"].map(function (mode) {
+          react.createElement("div", { className: "sst-mode-options" }, ["current-session", "configured"].map(function (mode) {
             return react.createElement(
               "label",
               {
                 key: mode,
-                style: {
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  padding: "2px 0",
-                  fontSize: 13,
-                  cursor: busy ? "default" : "pointer"
-                }
+                style: { cursor: busy ? "default" : "pointer" }
               },
               react.createElement("input", {
                 type: "radio",
@@ -2262,7 +2588,7 @@ window.__ModuleLoader__.load({
                   ? t("settings.modeConfigured")
                   : t("settings.modeDisabled")
             );
-          })
+          }))
         )
       );
 
@@ -2535,19 +2861,19 @@ window.__ModuleLoader__.load({
             "div",
             { style: { marginBottom: 6 } },
             react.createElement("label", { style: labelStyle, htmlFor: "sst-maxCharacters" }, t("settings.maxCharacters")),
-            react.createElement("input", {
+            react.createElement("div", { className: "sst-number-field" }, react.createElement("input", {
               type: "number",
               id: "sst-maxCharacters",
               min: 8,
               max: 120,
               value: draft.maxTitleCharacters !== undefined ? draft.maxTitleCharacters : (typeof user.maxTitleCharacters === "number" ? user.maxTitleCharacters : ""),
               disabled: busy,
-              placeholder: "26",
+              placeholder: t("settings.defaultLength"),
               style: Object.assign({ width: 80 }, fieldStyle),
               onChange: function (event) {
                 writeField("maxTitleCharacters", event.target.value);
               }
-            })
+            }), react.createElement("span", {}, t("settings.characterUnit")))
           ),
           react.createElement(
             "div",
@@ -2622,7 +2948,7 @@ window.__ModuleLoader__.load({
       var advancedIndex = children.length;
       children.push(react.createElement(
                 "div",
-                { style: { paddingLeft: 8, marginTop: 6 } },
+                { className: "sst-advanced-fields" },
                 react.createElement(
                   "div",
                   { style: { marginBottom: 6 } },
@@ -2696,43 +3022,56 @@ window.__ModuleLoader__.load({
       // Which build is loaded — the first thing a bug report needs.
       children.push(versionFooter(t));
 
-      var shapeSummary = [
-        user.titleStyle === "short-name" ? t("settings.styleShortName") : t("settings.styleActionObject"),
-        user.titleLanguage === "zh" ? t("settings.languageZh") : user.titleLanguage === "en" ? t("settings.languageEn") : t("settings.languageAuto"),
-        typeof value.maxTitleCharacters === "number" ? value.maxTitleCharacters + " " + t("settings.characterUnit") : t("settings.defaultLength")
-      ].join(" · ");
       var advancedSummary = [
         typeof value.timeoutMs === "number" ? t("settings.timeout") + " " + value.timeoutMs : "",
         typeof value.maxAttempts === "number" ? t("settings.maxAttempts") + " " + value.maxAttempts : ""
       ].filter(Boolean).join(" · ") || t("settings.defaultParameters");
 
-      return react.createElement("div", { className: "sst-settings" },
+      return react.createElement("div", { className: "sst-settings" + (workspacePair[0] ? " sst-workspace" : "") },
         react.createElement("style", {}, SETTINGS_CSS),
-        workspacePair[0] ? react.createElement("div", {},
-          react.createElement("button", { type: "button", onClick: function () { workspacePair[1](false); } }, t("batch.back")),
-          children[batchIndex]) : react.createElement("div", {},
-          react.createElement("header", { className: "sst-page-heading" },
-            react.createElement("h2", {}, t("nav")), children[0]),
-          error ? react.createElement("p", { role: "alert" }, error) : null,
-          react.createElement("p", { className: "sst-save-status", role: "status", "aria-live": "polite" }, statusPair[0]),
-          react.createElement("section", { className: "sst-section" },
-            react.createElement("div", { className: "sst-model-toolbar" }, children[1], saveButton),
-            react.createElement("div", { className: "sst-model-card" }, children.slice(2, shapeIndex).filter(function (child) { return (child.key || child.props.key) !== "privacy"; }))),
-          settingsDisclosure(t("settings.shapeLegend"), shapeSummary, children[shapeIndex]),
-          react.createElement("section", { className: "sst-section" }, sessionIdSetting),
-          settingsDisclosure(t("settings.advanced"), advancedSummary, children[advancedIndex]),
-          react.createElement("section", { className: "sst-batch-entry" },
-            react.createElement("button", { type: "button", onClick: function () { workspacePair[1](true); } }, t("batch.open")))),
-        react.createElement("details", { className: "sst-usage-help" },
-          react.createElement("summary", {}, t("settings.headerActions")),
-          react.createElement("h4", {}, t("settings.modelHelp")),
-          react.createElement("p", {}, t("settings.configuredNotice")),
-          react.createElement("h4", {}, t("action.short")),
-          react.createElement("p", {}, t("action.help")),
-          react.createElement("h4", {}, t("lock.short")),
-          react.createElement("p", {}, t("lock.help")),
-          react.createElement("p", {}, t("settings.lockBoundary"))),
-        children[batchIndex + 1]);
+        react.createElement("header", { className: "sst-page-heading" },
+          react.createElement("p", { className: "sst-wordmark" }, t("settings.brand")),
+          react.createElement("h2", {}, t(workspacePair[0] ? "batch.legend" : "nav")),
+          react.createElement("p", {}, t(workspacePair[0] ? "batch.tagline" : "settings.tagline"))),
+        react.createElement("nav", { className: "sst-tabs", "aria-label": t("nav") },
+          react.createElement("button", { type: "button", className: "sst-tab" + (!workspacePair[0] ? " is-active" : ""),
+            "aria-current": !workspacePair[0] ? "page" : undefined,
+            onClick: function () { workspacePair[1](false); } }, t("batch.back")),
+          react.createElement("button", { type: "button", className: "sst-tab" + (workspacePair[0] ? " is-active" : ""),
+            "aria-current": workspacePair[0] ? "page" : undefined,
+            onClick: function () { workspacePair[1](true); } }, t("batch.open"))),
+        workspacePair[0] ? children[batchIndex]
+          : react.createElement("div", {},
+            error ? react.createElement("p", { role: "alert" }, error) : null,
+            children[0],
+            react.createElement("section", { className: "sst-section sst-model-section" },
+              children[1],
+              effectiveMode === "current-session" ? react.createElement("p", { className: "sst-hint" }, t("settings.currentHint")) : null,
+              react.createElement("div", { className: "sst-model-card" },
+                children.slice(2, shapeIndex).filter(function (child) { return (child.key || child.props.key) !== "privacy"; }))),
+            react.createElement("section", { className: "sst-section" }, children[shapeIndex]),
+            react.createElement("section", { className: "sst-section" }, sessionIdSetting),
+            settingsDisclosure(t("settings.advanced"), advancedSummary, children[advancedIndex]),
+            react.createElement("details", { className: "sst-usage-help" },
+              react.createElement("summary", {}, t("settings.headerActions")),
+              react.createElement("p", {}, t("settings.subtitle")),
+              react.createElement("h4", {}, t("settings.modelHelp")),
+              react.createElement("p", {}, t("settings.configuredNotice")),
+              react.createElement("h4", {}, t("preview.open")),
+              react.createElement("p", {}, t("preview.hint")),
+              react.createElement("h4", {}, t("action.short")),
+              react.createElement("p", {}, t("action.help")),
+              react.createElement("h4", {}, t("lock.short")),
+              react.createElement("p", {}, t("lock.help")),
+              react.createElement("p", {}, t("settings.lockBoundary")),
+              react.createElement("h4", {}, t("settings.showSessionId")),
+              react.createElement("p", {}, t("settings.showSessionIdHint"))),
+            react.createElement("footer", { className: "sst-footer" },
+              react.createElement("div", { className: "sst-footer-copy" }, children[batchIndex + 1],
+                react.createElement("p", { className: "sst-save-status", role: "status", "aria-live": "polite" },
+                  (statusPair[0] ? t(statusPair[0]) : "") || (Object.keys(pendingPair[0]).length || Object.keys(draft).length || exclusionDraft !== undefined
+                    ? t("settings.unsaved") : ""))),
+              saveButton)));
     }
 
     /**
@@ -2758,6 +3097,7 @@ window.__ModuleLoader__.load({
       var mounted = react.useRef(true);
 
       react.useEffect(function () {
+        mounted.current = true;
         return function () {
           mounted.current = false;
         };
@@ -2877,6 +3217,9 @@ window.__ModuleLoader__.load({
       var batch = props.batch;
       var listSessions = props.listSessions;
       var aiDisabled = props.disabled === true;
+      var previewSelectionPair = react.useState({});
+      var previewSelection = previewSelectionPair[0];
+      var setPreviewSelection = previewSelectionPair[1];
       // DSH's provider directory, used to warn about sessions whose logged model
       // no longer exists — before the run, not after thirteen failures.
       var catalog = props.catalog;
@@ -2909,6 +3252,7 @@ window.__ModuleLoader__.load({
       var mounted = react.useRef(true);
       var lastStatus = react.useRef(snap.status);
       react.useEffect(function () {
+        mounted.current = true;
         return function () {
           mounted.current = false;
         };
@@ -2987,24 +3331,6 @@ window.__ModuleLoader__.load({
         );
       }
 
-      var fieldStyle = {
-        boxSizing: "border-box",
-        padding: "4px 8px",
-        borderRadius: 6,
-        border: "1px solid var(--dsw-alias-border-l4)",
-        background: "var(--dsw-alias-bg-base)",
-        color: "inherit",
-        fontSize: 13
-      };
-      var buttonStyle = {
-        padding: "4px 10px",
-        borderRadius: 6,
-        border: "1px solid var(--dsw-alias-border-l4)",
-        background: "var(--dsw-alias-bg-base)",
-        color: "inherit",
-        fontSize: 13,
-        cursor: "pointer"
-      };
       var running = snap.status === "running";
       // Locked sessions are excluded from the batch, per the lock's whole purpose:
       // a batch run is one of the two deliberate paths allowed to overwrite a
@@ -3046,438 +3372,222 @@ window.__ModuleLoader__.load({
         if (deadStatus === "provider-missing" || deadStatus === "model-missing") deadRoutes += 1;
       }
 
-      var children = [];
+      var previews = Array.isArray(snap.previews) ? snap.previews : [];
+      var applicable = previews.filter(function (candidate) {
+        return !candidate.applied && lockedIds.indexOf(candidate.sessionId) === -1;
+      });
+      var chosen = applicable.filter(function (candidate) { return previewSelection[candidate.previewId] !== false; });
+      var rowsById = Object.create(null);
+      allRows.forEach(function (row) { rowsById[row.sessionId] = row; });
+      var visiblePreviews = previews.filter(function (candidate) {
+        var row = rowsById[candidate.sessionId];
+        return (!cwdFilter || row && row.cwd === cwdFilter) &&
+          (!query || [candidate.previousTitle, candidate.title, candidate.sessionId].join(" ").toLocaleLowerCase().includes(query));
+      });
 
-      children.push(
-        react.createElement(
-          "legend",
-          { key: "legend", style: { fontWeight: 500, marginBottom: 4, padding: 0, fontSize: 13 } },
-          t("batch.legend")
-        )
-      );
-      children.push(
-        react.createElement("p", { key: "intro", style: Object.assign({ marginTop: 0, marginBottom: 4 }, HINT_STYLE) }, t("batch.intro"))
-      );
-      children.push(
-        react.createElement("p", { key: "cost", style: Object.assign({ marginTop: 0, marginBottom: 8 }, HINT_STYLE) }, t("batch.costHint"))
-      );
-      children.push(
-        react.createElement("p", { key: "route", style: Object.assign({ marginTop: 0, marginBottom: 8 }, HINT_STYLE) }, t("batch.routeHint"))
-      );
-      // Which route this run will use — the single most useful fact when a batch
-      // keeps failing: in session mode each stored session brings its own model.
-      if (props.route !== undefined && props.route !== null) {
-        var routeText = props.route.mode === "configured"
-          ? t("settings.modeConfigured") + ": " + (props.route.provider || "—") + " / " + (props.route.model || "—")
-          : t("settings.modeCurrent");
-        children.push(
-          react.createElement(
-            "p",
-            { key: "route-in-use", style: Object.assign({ marginTop: 0, marginBottom: 8 }, HINT_STYLE) },
-            t("batch.routeInUse") + ": " + routeText
-          )
-        );
-        // Automatic fallback opt-in. It needs a SAVED configured pair, because
-        // that is the route the retry pass switches to.
-        var fallbackReady = props.route.provider !== "" && props.route.model !== "";
-        children.push(
-          react.createElement(
-            "label",
-            {
-              key: "fallback",
-              style: {
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                fontSize: 12,
-                marginBottom: 2,
-                cursor: fallbackReady && !running ? "pointer" : "default"
-              }
-            },
-            react.createElement("input", {
-              type: "checkbox",
-              checked: autoFallback,
+      function selectVisibleSessions() {
+        var next = Object.assign({}, selected);
+        visible.forEach(function (row) { next[row.sessionId] = true; });
+        setSelected(next);
+      }
+      function retryFailures() {
+        batch.start(snap.failures.map(function (failure) {
+          return { sessionId: failure.sessionId, previewId: failure.previewId };
+        }), snap.operation);
+      }
+
+      var sessionRows = react.createElement("div", { className: "sst-session-list" },
+        visible.length === 0 ? react.createElement("p", { className: "sst-empty" }, t("batch.noMatches"))
+          : visible.map(function (row) {
+            var title = titleOfSessionRow(row) || t("batch.noTitle");
+            var rowRoute = routeOfSessionRow(row);
+            var routeStatus = classifySessionRoute(rowRoute, catalog);
+            var meta = [];
+            if (typeof row.cwd === "string" && row.cwd !== "") meta.push(row.cwd);
+            if (typeof row.updatedAt === "number") meta.push(new Date(row.updatedAt).toLocaleString());
+            if (rowRoute !== undefined) meta.push(routeLabelOf(rowRoute) +
+              (routeStatus === "provider-missing" || routeStatus === "model-missing" ? " · " + t("batch.routeDead") : ""));
+            if (row.running === true) meta.push(t("batch.runningBadge"));
+            return react.createElement("label", { key: row.sessionId, className: "sst-session-row" },
+              react.createElement("input", {
+                type: "checkbox", "aria-label": t("batch.selectSession") + ": " + title,
+                checked: selected[row.sessionId] === true, disabled: running,
+                onChange: function () {
+                  var next = Object.assign({}, selected);
+                  if (next[row.sessionId] === true) delete next[row.sessionId];
+                  else next[row.sessionId] = true;
+                  setSelected(next);
+                }
+              }),
+              react.createElement("span", {},
+                react.createElement("span", { className: "sst-row-title" }, title),
+                react.createElement("span", { className: "sst-row-meta" }, meta.join(" · "))));
+          }));
+
+      var comparison = previews.length === 0 ? null : react.createElement("section", { key: "comparison", className: "sst-comparison" },
+        react.createElement("div", { className: "sst-comparison-toolbar" },
+          react.createElement("h3", {}, t("batch.comparison")),
+          react.createElement("button", { type: "button", className: "sst-text-button", disabled: running,
+            onClick: function () { setPreviewSelection({}); } }, t("batch.selectPreviews"))),
+        visiblePreviews.length === 0 ? react.createElement("p", { className: "sst-empty" }, t("batch.noMatches"))
+          : react.createElement("div", { className: "sst-comparison-table" },
+            react.createElement("div", { className: "sst-comparison-heading", "aria-hidden": true },
+              react.createElement("span", {}),
+              react.createElement("span", {}, t("preview.old")),
+              react.createElement("span", {}),
+              react.createElement("span", {}, t("preview.new"))),
+            react.createElement("div", { className: "sst-comparison-rows" }, visiblePreviews.map(function (candidate) {
+              var locked = lockedIds.indexOf(candidate.sessionId) !== -1;
+              var row = rowsById[candidate.sessionId];
+              var meta = row && typeof row.cwd === "string" && row.cwd ? row.cwd : candidate.sessionId;
+              return react.createElement("label", { key: candidate.previewId, className: "sst-comparison-row" },
+                react.createElement("input", {
+                  type: "checkbox", "aria-label": t("batch.selectCandidate") + ": " + candidate.title,
+                  checked: !candidate.applied && !locked && previewSelection[candidate.previewId] !== false,
+                  disabled: running || candidate.applied || locked,
+                  onChange: function () {
+                    var next = Object.assign({}, previewSelection);
+                    next[candidate.previewId] = previewSelection[candidate.previewId] === false;
+                    setPreviewSelection(next);
+                  }
+                }),
+                react.createElement("div", { className: "sst-title-before" },
+                  react.createElement("span", { className: "sst-mobile-label" }, t("preview.old")),
+                  candidate.previousTitle || t("batch.noTitle"),
+                  react.createElement("div", { className: "sst-row-meta", title: candidate.sessionId }, meta)),
+                react.createElement("span", { className: "sst-comparison-arrow" }, uiGlyph("arrow")),
+                react.createElement("div", { className: "sst-title-after" },
+                  react.createElement("span", { className: "sst-mobile-label" }, t("preview.new")),
+                  candidate.title,
+                  candidate.applied || locked ? react.createElement("span", { className: "sst-candidate-state" },
+                    t(candidate.applied ? "preview.applied" : "action.locked")) : null));
+            }))));
+
+      var progress = null;
+      if (snap.status !== "idle") {
+        var percent = snap.total === 0 ? 0 : Math.round((snap.completed / snap.total) * 100);
+        var statusLabel = running
+          ? t(snap.operation === "preview" ? "batch.previewing" : snap.operation === "apply" ? "batch.applying" : "batch.running")
+          : snap.status === "cancelled" ? t("batch.cancelled")
+            : snap.status === "error" ? t("batch.error")
+              : t(snap.operation === "preview" ? "batch.previewDone" : snap.operation === "apply" ? "batch.applyDone" : "batch.done");
+        progress = react.createElement("div", { key: "progress", className: "sst-batch-progress" +
+          (snap.status === "done" && snap.failed === 0 ? " is-success" : ""), role: "status", "aria-live": "polite" },
+          react.createElement("div", { className: "sst-progress-heading" },
+            react.createElement("strong", { className: "sst-progress-title" },
+              snap.status === "done" && snap.failed === 0 ? react.createElement("span", { className: "sst-success-mark" }, uiGlyph("check")) : null,
+              statusLabel),
+            react.createElement("span", {}, t("batch.completedCount") + " " + snap.completed + " / " + snap.total +
+              " · " + t("batch.okCount") + " " + snap.succeeded + " · " + t("batch.failedCount") + " " + snap.failed)),
+          running ? react.createElement("div", { className: "sst-progress-track", role: "progressbar",
+            "aria-label": statusLabel, "aria-valuemin": 0, "aria-valuemax": snap.total, "aria-valuenow": snap.completed },
+            react.createElement("div", { className: "sst-progress-fill", style: { width: percent + "%" } })) : null,
+          snap.status === "done" && snap.operation === "preview" && !previews.some(function (candidate) { return candidate.applied; })
+            ? react.createElement("p", { className: "sst-hint" }, t("batch.notSaved")) : null,
+          snap.cancelRequested === true && running ? react.createElement("p", { className: "sst-hint" }, t("batch.cancelling")) : null,
+          snap.fallback === "running" ? react.createElement("p", { className: "sst-hint" },
+            t("batch.fallbackRunning") + " " + snap.retryCompleted + " / " + snap.retryTotal) : null,
+          snap.fallback === "done" ? react.createElement("p", { className: "sst-hint" },
+            t("batch.fallbackDone") + " (" + t("settings.modeConfigured") + ")") : null,
+          snap.fallback === "cancelled" ? react.createElement("p", { className: "sst-hint" }, t("batch.fallbackCancelled")) : null,
+          snap.fallback === "failed" ? react.createElement("p", { className: "sst-hint" }, t("batch.fallbackFailed")) : null,
+          running ? react.createElement("button", { type: "button", disabled: snap.cancelRequested === true,
+            onClick: function () { batch.cancel(); } }, t("batch.cancel")) : null,
+          running && snap.currentSessionId ? react.createElement("p", { className: "sst-hint" },
+            t("batch.current") + ": " + snap.currentSessionId) : null,
+          snap.failures.length > 0 ? react.createElement("details", { className: "sst-batch-help", open: true },
+            react.createElement("summary", {}, t("batch.failures") + " (" + snap.failures.length + ")"),
+            snap.failures.map(function (failure) {
+              var label = failure.kind === "unavailable" ? t("batch.kindUnavailable") : t("batch.kindError");
+              return react.createElement("p", { key: failure.sessionId },
+                failure.sessionId + " — " + label + (failure.reason ? ": " + failure.reason : ""));
+            })) : null);
+      }
+
+      var fallbackReady = props.route && typeof props.route.provider === "string" && props.route.provider !== "" &&
+        typeof props.route.model === "string" && props.route.model !== "";
+      var directOptions = props.route && props.route.mode !== "configured"
+        ? react.createElement("details", { className: "sst-batch-options" },
+          react.createElement("summary", {}, t("batch.directOptions")),
+          react.createElement("label", { className: "sst-fallback-choice" },
+            react.createElement("input", { id: "sst-batch-fallback", type: "checkbox", checked: autoFallback,
               disabled: !fallbackReady || running,
               onChange: function (event) {
                 var next = event.target.checked;
-                setAutoFallback(next);
-                writeFallbackPreference(next);
-                if (batch !== undefined) batch.setAutoFallback(next);
-              }
-            }),
-            t("batch.fallback")
-          )
-        );
-        children.push(
-          react.createElement(
-            "p",
-            { key: "fallback-hint", style: Object.assign({ marginTop: 0, marginBottom: 8 }, HINT_STYLE) },
-            fallbackReady ? t("batch.fallbackHint") : t("batch.fallbackNeedsRoute")
-          )
-        );
-      }
+                setAutoFallback(next); writeFallbackPreference(next);
+                batch.setAutoFallback(next);
+              } }), t("batch.fallback")),
+          react.createElement("p", { className: "sst-hint" },
+            fallbackReady ? t("batch.fallbackHint") : t("batch.fallbackNeedsRoute"))) : null;
 
-      if (aiDisabled) {
-        children.push(
-          react.createElement("p", { key: "off", style: Object.assign({ marginTop: 0, marginBottom: 8 }, HINT_STYLE) }, t("batch.disabled"))
-        );
-      }
+      var reloadLabel = loading ? t("batch.loading") : rows === undefined ? t("batch.load") : t("batch.reload");
+      var routeText = props.route && props.route.mode === "configured"
+        ? t("settings.modeConfigured") + ": " + (props.route.provider || "—") + " / " + (props.route.model || "—")
+        : t("settings.modeCurrent");
 
-      children.push(
-        react.createElement(
-          "div",
-          { key: "load", style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 8 } },
-          react.createElement(
-            "button",
-            {
-              type: "button",
-              style: buttonStyle,
-              disabled: loading || running,
-              onClick: load
-            },
-            loading ? t("batch.loading") : rows === undefined ? t("batch.load") : t("batch.reload")
-          ),
-          list.length > 0
-            ? react.createElement(
-                "span",
-                { key: "count", style: HINT_STYLE },
-                t("batch.count") + ": " + String(list.length)
-              )
-            : null,
-          // Say how many the lock removed, so a smaller list is explained rather
-          // than looking like the lock silently did nothing.
-          lockedSkipped > 0
-            ? react.createElement(
-                "span",
-                { key: "locked-skipped", style: HINT_STYLE },
-                t("batch.skippedLocked") + ": " + String(lockedSkipped)
-              )
-            : null
-        )
-      );
-
-      if (rows === null) {
-        children.push(
-          react.createElement("p", { key: "load-error", role: "alert", style: HINT_STYLE }, t("batch.loadFailed"))
-        );
-      } else if (Array.isArray(rows) && list.length === 0) {
-        children.push(react.createElement("p", { key: "empty", style: HINT_STYLE }, t("batch.empty")));
-      }
-
-      if (list.length > 0) {
-        children.push(
-          react.createElement(
-            "div",
-            { key: "toolbar", style: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 } },
-            cwds.length > 1
-              ? react.createElement(
-                  "select",
-                  {
-                    value: cwdFilter,
-                    disabled: running,
-                    style: Object.assign({ maxWidth: 260 }, fieldStyle, { width: "auto" }),
-                    onChange: function (event) {
-                      setCwdFilter(event.target.value);
-                    }
-                  },
-                  [react.createElement("option", { key: "__all", value: "" }, t("batch.allCwd"))].concat(
-                    cwds.map(function (value) {
-                      return react.createElement("option", { key: value, value: value }, value);
-                    })
-                  )
-                )
-              : null,
-            react.createElement(
-              "button",
-              {
-                type: "button",
-                style: buttonStyle,
-                disabled: running,
-                onClick: function () {
-                  var next = Object.assign({}, selected);
-                  for (var i = 0; i < visible.length; i += 1) next[visible[i].sessionId] = true;
-                  setSelected(next);
-                }
-              },
-              t("batch.selectAll")
-            ),
-            react.createElement(
-              "button",
-              {
-                type: "button",
-                style: buttonStyle,
-                disabled: running,
-                onClick: function () {
-                  setSelected({});
-                }
-              },
-              t("batch.clear")
-            ),
-            react.createElement(
-              "span",
-              { style: HINT_STYLE },
-              t("batch.selectedCount") + ": " + String(selectedRows.length)
-            )
-          )
-        );
-
-        // Say it up front: these sessions record a model DSH no longer serves, so
-        // in "Current session model" mode they can only fail.
-        if (deadRoutes > 0) {
-          children.push(
-            react.createElement(
-              "p",
-              { key: "dead-routes", role: "status", style: Object.assign({ marginTop: 0, marginBottom: 6 }, HINT_STYLE) },
-              "⚠ " + t("batch.routeDeadSummary") + ": " + String(deadRoutes) + " / " + String(visible.length)
-            )
-          );
-        }
-
-        children.push(
-          react.createElement(
-            "div",
-            {
-              key: "rows",
-              style: {
-                maxHeight: 220,
-                overflowY: "auto",
-                border: "1px solid var(--dsw-alias-border-l4)",
-                borderRadius: 6,
-                padding: "2px 6px",
-                marginBottom: 8
-              }
-            },
-            visible.map(function (row) {
-              var title = titleOfSessionRow(row);
-              var rowRoute = routeOfSessionRow(row);
-              var routeStatus = classifySessionRoute(rowRoute, catalog);
-              var meta = [];
-              if (typeof row.cwd === "string" && row.cwd !== "") meta.push(row.cwd);
-              if (typeof row.updatedAt === "number") meta.push(new Date(row.updatedAt).toLocaleString());
-              // The model this session would use in "Current session model" mode —
-              // flagged when DSH no longer knows it, which is the whole reason a
-              // batch of old sessions fails.
-              if (rowRoute !== undefined) {
-                meta.push(
-                  routeLabelOf(rowRoute) +
-                    (routeStatus === "provider-missing" || routeStatus === "model-missing"
-                      ? " ⚠ " + t("batch.routeDead")
-                      : "")
-                );
-              }
-              if (row.running === true) meta.push(t("batch.runningBadge"));
-              return react.createElement(
-                "label",
-                {
-                  key: row.sessionId,
-                  style: {
-                    display: "flex",
-                    alignItems: "baseline",
-                    gap: 6,
-                    padding: "3px 0",
-                    fontSize: 13,
-                    cursor: running ? "default" : "pointer"
-                  }
-                },
-                react.createElement("input", {
-                  type: "checkbox",
-                  checked: selected[row.sessionId] === true,
-                  disabled: running,
-                  onChange: function () {
-                    var next = Object.assign({}, selected);
-                    if (next[row.sessionId] === true) delete next[row.sessionId];
-                    else next[row.sessionId] = true;
-                    setSelected(next);
-                  }
-                }),
-                react.createElement(
-                  "span",
-                  { style: { display: "flex", flexDirection: "column", minWidth: 0 } },
-                  react.createElement(
-                    "span",
-                    { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
-                    title === "" ? t("batch.noTitle") : title
-                  ),
-                  react.createElement("span", { style: HINT_STYLE }, meta.join(" · "))
-                )
-              );
-            })
-          )
-        );
-
-        if (truncated) {
-          children.push(react.createElement("p", { key: "truncated", style: HINT_STYLE }, t("batch.truncated")));
-        }
-
-        children.push(
-          react.createElement(
-            "div",
-            { key: "actions", style: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 8 } },
-            react.createElement("p", { style: { flexBasis: "100%", margin: "8px 0", fontSize: 12 } }, t("batch.intro")),
-            react.createElement(
-              "button",
-              {
-                type: "button",
-                style: Object.assign({}, buttonStyle, {
-                  opacity: canStart ? 1 : 0.45,
-                  cursor: canStart ? "pointer" : "default"
-                }),
-                disabled: !canStart,
-                onClick: function () {
-                  batch.start(selectedRows);
-                }
-              },
-              t("batch.start") + " (" + String(selectedRows.length) + ")"
-            ),
-            !running && snap.failures.length > 0
-              ? react.createElement(
-                  "button",
-                  {
-                    type: "button",
-                    style: buttonStyle,
-                    onClick: function () {
-                      // Retry exactly the sessions that failed, with whatever
-                      // route settings are in force now (the usual fix is to
-                      // move from "follow the session model" to a configured
-                      // model, because an old session's logged route may be gone).
-                      batch.start(snap.failures.map(function (failure) {
-                        return { sessionId: failure.sessionId };
-                      }));
-                    }
-                  },
-                  t("batch.retryFailed") + " (" + String(snap.failures.length) + ")"
-                )
-              : null
-          )
-        );
-      }
-
-      if (snap.status !== "idle") {
-        var percent = snap.total === 0 ? 0 : Math.round((snap.completed / snap.total) * 100);
-        var statusLabel = snap.status === "running"
-          ? t("batch.running")
-          : snap.status === "cancelled"
-            ? t("batch.cancelled")
-            : snap.status === "error" ? t("batch.error") : t("batch.done");
-        children.push(
-          react.createElement(
-            "div",
-            { key: "progress" },
-            react.createElement(
-              "div",
-              { style: { display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12 } },
-              react.createElement("span", {}, t("batch.status") + ": " + statusLabel),
-              react.createElement(
-                "span",
-                { style: { color: "var(--dsw-alias-label-tertiary)" } },
-                t("batch.completedCount") + " " + String(snap.completed) + " / " + String(snap.total) +
-                  " · " + t("batch.okCount") + " " + String(snap.succeeded) +
-                  " · " + t("batch.failedCount") + " " + String(snap.failed)
-              )
-            ),
-            react.createElement(
-              "div",
-              {
-                role: "progressbar",
-                "aria-valuemin": 0,
-                "aria-valuemax": snap.total,
-                "aria-valuenow": snap.completed,
-                style: {
-                  height: 6,
-                  borderRadius: 999,
-                  margin: "4px 0",
-                  background: "var(--dsw-alias-border-l4)",
-                  overflow: "hidden"
-                }
-              },
-              react.createElement("div", {
-                style: {
-                  height: "100%",
-                  width: String(percent) + "%",
-                  borderRadius: 999,
-                  background: "var(--dsw-alias-label-tertiary)"
-                }
-              })
-            ),
-            snap.cancelRequested === true && running
-              ? react.createElement("p", { style: HINT_STYLE }, t("batch.cancelling"))
-              : null,
-            snap.fallback === "running"
-              ? react.createElement("p", { role: "status", style: HINT_STYLE }, t("batch.fallbackRunning") + " " + snap.retryCompleted + " / " + snap.retryTotal)
-              : null,
-            snap.fallback === "done"
-              ? react.createElement(
-                  "p",
-                  { role: "status", style: HINT_STYLE },
-                  t("batch.fallbackDone") + " (" + t("settings.modeConfigured") + ")"
-                )
-              : null,
-            snap.fallback === "cancelled"
-              ? react.createElement("p", { role: "status", style: HINT_STYLE }, t("batch.fallbackCancelled"))
-              : null,
-            snap.fallback === "failed"
-              ? react.createElement("p", { role: "status", style: HINT_STYLE }, t("batch.fallbackFailed"))
-              : null,
-            // Stop lives here rather than beside the selection buttons: it must
-            // stay reachable while a run is in flight, whatever state the list is
-            // in. The same control also sits in the global overlay, for when this
-            // page is closed.
-            running
-              ? react.createElement(
-                  "button",
-                  {
-                    type: "button",
-                    style: Object.assign({}, buttonStyle, { marginTop: 4, marginBottom: 4 }),
-                    disabled: snap.cancelRequested === true,
-                    onClick: function () {
-                      batch.cancel();
-                    }
-                  },
-                  t("batch.cancel")
-                )
-              : null,
-            running && snap.currentSessionId !== ""
-              ? react.createElement(
-                  "p",
-                  { style: Object.assign({ marginTop: 0, marginBottom: 4 }, HINT_STYLE) },
-                  t("batch.current") + ": " + snap.currentSessionId
-                )
-              : null,
-            snap.failures.length > 0
-              ? react.createElement(
-                  "div",
-                  { style: { marginTop: 4 } },
-                  react.createElement("p", { style: Object.assign({ marginTop: 0, marginBottom: 2 }, HINT_STYLE) }, t("batch.failures")),
-                  snap.failures.map(function (failure) {
-                    // The host's own wording is the actionable part: it is what
-                    // separates a dead historical route from a timeout.
-                    var label = failure.kind === "unavailable" ? t("batch.kindUnavailable") : t("batch.kindError");
-                    var detail = typeof failure.reason === "string" && failure.reason !== ""
-                      ? label + ": " + failure.reason
-                      : label;
-                    return react.createElement(
-                      "p",
-                      { key: failure.sessionId, style: Object.assign({}, HINT_STYLE, { wordBreak: "break-word" }) },
-                      failure.sessionId + " — " + detail
-                    );
-                  })
-                )
-              : null
-          )
-        );
-      }
-
-      return react.createElement("section", { className: "sst-batch" },
-        react.createElement("h2", {},
-          react.createElement("span", {}, t("batch.legend")),
-          react.createElement("span", { className: "sst-batch-summary" },
-            running ? t("batch.running") + " · " + snap.completed + " / " + snap.total : t("batch.summary"))),
-        react.createElement("div", { className: "sst-batch-body" },
-          children[1],
-          react.createElement("details", { className: "sst-batch-help" },
-            react.createElement("summary", {}, t("batch.help")), children[2], children[3]),
-          react.createElement("input", { type: "search", "aria-label": t("batch.search"), placeholder: t("batch.search"), value: searchPair[0], onChange: function (event) { searchPair[1](event.target.value); } }),
-          children.slice(4).filter(function (child) { return !(props.route && props.route.mode === "configured" && ((child.key || child.props.key) === "fallback" || (child.key || child.props.key) === "fallback-hint")); })));
+      return react.createElement("section", { className: "sst-batch", "aria-label": t("batch.legend") },
+        props.route ? react.createElement("div", { className: "sst-route-banner" }, uiGlyph("model"),
+          react.createElement("span", {}, t("batch.routeInUse") + ": " + routeText)) : null,
+        aiDisabled ? react.createElement("p", { className: "sst-notice" }, t("batch.disabled")) : null,
+        react.createElement("div", { className: "sst-filter-toolbar" },
+          react.createElement("div", { className: "sst-search" }, uiGlyph("search"),
+            react.createElement("input", { type: "search", "aria-label": t("batch.search"), placeholder: t("batch.search"),
+              value: searchPair[0], disabled: loading || running,
+              onChange: function (event) { searchPair[1](event.target.value); } })),
+          react.createElement("select", { "aria-label": t("batch.cwd"), value: cwdFilter, disabled: running,
+            onChange: function (event) { setCwdFilter(event.target.value); } },
+            [react.createElement("option", { key: "__all", value: "" }, t("batch.allCwd"))].concat(
+              cwds.map(function (value) { return react.createElement("option", { key: value, value: value }, value); }))),
+          react.createElement("button", { type: "button", className: "sst-icon-button", disabled: loading || running,
+            title: reloadLabel, "aria-label": reloadLabel, onClick: load }, uiGlyph("reload"),
+            react.createElement("span", { className: "sst-sr-only" }, reloadLabel))),
+        loading ? react.createElement("p", { className: "sst-hint", role: "status" }, t("batch.loading")) : null,
+        Array.isArray(rows) ? react.createElement("div", { className: "sst-batch-meta" },
+          react.createElement("span", {}, t("batch.count") + ": " + list.length),
+          lockedSkipped > 0 ? react.createElement("span", {}, t("batch.skippedLocked") + ": " + lockedSkipped) : null) : null,
+        rows === null ? react.createElement("p", { role: "alert" }, t("batch.loadFailed"))
+          : Array.isArray(rows) && list.length === 0 ? react.createElement("p", { className: "sst-empty" }, t("batch.empty")) : null,
+        list.length > 0 ? react.createElement("div", { className: "sst-selection-toolbar" },
+          react.createElement("div", { className: "sst-selection-buttons" },
+            react.createElement("button", { type: "button", disabled: running, onClick: selectVisibleSessions }, t("batch.selectAll")),
+            react.createElement("button", { type: "button", disabled: running, onClick: function () { setSelected({}); } }, t("batch.clear")),
+            react.createElement("span", {}, t("batch.selectedCount") + ": " + selectedRows.length)),
+          react.createElement("div", { className: "sst-run-buttons" },
+            react.createElement("button", { type: "button", className: "sst-secondary", disabled: !canStart,
+              onClick: function () { batch.start(selectedRows, "preview"); } }, t("batch.preview") + " (" + selectedRows.length + ")"),
+            react.createElement("button", { type: "button", className: "sst-text-button", disabled: !canStart,
+              title: t("batch.intro"), onClick: function () { batch.start(selectedRows); } },
+              t("batch.start") + " (" + selectedRows.length + ")"))) : null,
+        deadRoutes > 0 ? react.createElement("p", { className: "sst-notice", role: "status" },
+          t("batch.routeDeadSummary") + ": " + deadRoutes + " / " + visible.length) : null,
+        list.length > 0 ? previews.length > 0
+          ? react.createElement("details", { className: "sst-session-picker" },
+            react.createElement("summary", {}, t("batch.chooseSessions") + " · " + t("batch.selectedCount") + ": " + selectedRows.length),
+            sessionRows) : sessionRows : null,
+        truncated ? react.createElement("p", { className: "sst-hint" }, t("batch.truncated")) : null,
+        comparison,
+        progress,
+        !running && !aiDisabled && snap.failures.length > 0 ? react.createElement("button", {
+          type: "button", className: "sst-secondary", onClick: retryFailures
+        }, t("batch.retryFailed") + " (" + snap.failures.length + ")") : null,
+        directOptions,
+        react.createElement("details", { className: "sst-batch-help" },
+          react.createElement("summary", {}, t("batch.help")),
+          react.createElement("p", {}, t("batch.intro")),
+          react.createElement("p", {}, t("batch.costHint")),
+          react.createElement("p", {}, t("batch.routeHint")),
+          react.createElement("p", {}, t("batch.previewHint")),
+          react.createElement("p", {}, t("preview.hint"))),
+        previews.length > 0 ? react.createElement("footer", { className: "sst-footer" },
+          react.createElement("div", { className: "sst-footer-copy" },
+            react.createElement("strong", {}, t("batch.selectedPreviews") + ": " + chosen.length),
+            react.createElement("p", { className: "sst-hint" }, t("batch.previewBrief"))),
+          react.createElement("div", { className: "sst-footer-actions" },
+            react.createElement("button", { type: "button", disabled: running,
+              onClick: function () { batch.clearPreviews(); setPreviewSelection({}); } }, t("batch.clearPreviews")),
+            react.createElement("button", { type: "button", className: "sst-primary",
+              disabled: running || aiDisabled || chosen.length === 0,
+              onClick: function () { batch.start(chosen, "apply"); } }, t("batch.applyPreviews") + " (" + chosen.length + ")"))) : null);
 
     }
 

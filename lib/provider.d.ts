@@ -4,8 +4,7 @@
  * Responsibilities, and deliberately nothing else:
  *  - gate out first prompts that carry no task,
  *  - compress an oversized prompt instead of failing,
- *  - make exactly one auxiliary `ctx.llm.stream()` call (plus at most one
- *    retry), and
+ *  - make bounded auxiliary `ctx.llm.stream()` calls through the shared service,
  *  - hand a validated title back to the service.
  *
  * It never calls `session.append()`. Persistence, revision tracking,
@@ -141,6 +140,10 @@ export interface ProviderDependencies {
     readonly consumeExplicitRegeneration?: ((sessionId: string) => boolean) | undefined;
     /** Local outcome counters, if the plugin is collecting them. */
     readonly diagnostics?: TitleDiagnostics | undefined;
+    /** Observe settings changes so locking can abort an in-flight title stream. */
+    readonly subscribeSettings?: ((callback: () => void) => () => void) | undefined;
+    /** Injectable cancellable retry delay; production uses an AbortSignal-aware timer. */
+    readonly waitForRetry?: ((delayMs: number, signal: AbortSignal) => Promise<void>) | undefined;
 }
 /**
  * The configuration in force for one generation.
@@ -152,8 +155,10 @@ export interface TitlePolicy {
     readonly config: TitleConfig;
     readonly settings: TitleSettings;
 }
-/** Supplies the live policy. Evaluated once per `generate()`. */
+/** Initial generation policy; evaluated again only to enforce a new title lock. */
 export type TitlePolicySource = () => TitlePolicy;
+/** Classify permanent adapter errors and HTTP 4xx errors before retrying. */
+export declare function isRetryableModelFailure(failure: unknown): boolean;
 /** Why one attempt produced no usable title. */
 export type AttemptFailure = {
     readonly kind: "finish";
@@ -178,16 +183,17 @@ export type AttemptFailure = {
  * at all — that shape means the budget was spent on reasoning, so it gets the
  * caller's single retry instead of failing outright.
  */
-/** Title calls omit optional sessionId on every attempt.
- * `extension`: a remaining global DSH request extension failure is terminal. */
+/** `extension`: DSH request extension failure; title requests are isolated from session extension hooks from the first call.
+ * A request extension failure is terminal. */
 export type TitleFailureKind = "extension" | "timeout" | "cancelled" | "model" | "protocol" | "output" | "excluded";
-/** A provider failure that the service will log and swallow (fallback stays). */
+/** A provider failure handled by Core; explicit commands report it to the caller. */
 export declare class TitleGenerationError extends Error {
     readonly reason: string;
     readonly retryable: boolean;
     /** Structural class of the failure, for diagnostics classification. */
     readonly kind: TitleFailureKind;
-    constructor(reason: string, retryable?: boolean, kind?: TitleFailureKind);
+    readonly retryAfterMs: number;
+    constructor(reason: string, retryable?: boolean, kind?: TitleFailureKind, retryAfterMs?: number);
 }
 /**
  * Thrown for an abstention: a deliberate non-generation that the service logs

@@ -127,7 +127,8 @@ export declare function findExcludedTerm(text: string, compiled: readonly Compil
  * Used before generation (the model never sees the term) and as the
  * deterministic last resort when one survives into the model's output. Line
  * structure is preserved; only the whitespace left on an affected line is
- * repaired.
+ * repaired. Deletion and repair repeat until no excluded term remains,
+ * including terms formed by joining fragments of another deleted term.
  *
  * @param text - the text to redact.
  * @param compiled - output of {@link compileTitleExclusions}.
@@ -149,7 +150,7 @@ export declare function extractSalientRegions(input: string): string;
  * Order of operations: redact the exclusion terms, window the raw text if it is
  * absurdly large, drop large code blocks, then fall back to structural
  * extraction, then to head+tail. The function never rejects an input on size
- * alone, and redaction runs first so nothing downstream can reintroduce a term.
+ * alone. Redaction runs before compression and again on its completed output.
  *
  * @param input - the raw human message.
  * @param config - resolved composition config.

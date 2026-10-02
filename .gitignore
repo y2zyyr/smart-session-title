@@ -8,6 +8,7 @@ validation/*
 !validation/verify-i18n.mjs
 !validation/verify-host-policy.mjs
 !validation/verify-provider.mjs
+!validation/verify-preview.mjs
 # Local-only agent collaboration instructions (never published to GitHub)
 AGENTS.md
 CLAUDE.md
